@@ -1,0 +1,9 @@
+# 테라폼 실행 시 생기는 junk 파일 및 민감한 상태 파일 제외 규칙
+.terraform/
+*.tfstate
+*.tfstate.*
+*.lock.hcl
+*.tfvars
+*.tfvars.json
+.terraformrc
+terraform.rc
