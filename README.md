@@ -72,6 +72,7 @@
 ```
 
 ## 📂 디렉터리 구조 및 파일 역할 설명
+```text
 stockops-infra/
 ├── .github/
 │   └── workflows/
@@ -90,3 +91,4 @@ stockops-infra/
     ├── main.tf               # - 모듈들을 순서대로 호출하여 조립하는 마스터 파일
     ├── security_groups.tf    # - 완벽하게 분리된 독립형 방화벽 규칙 집중 관리 파일
     └── kubernetes.tf         # - stockops 네임스페이스 및 실서비스 Pod 명세 제어 파일
+```
