@@ -3,8 +3,10 @@
 # ==========================================================================
 
 resource "aws_ecr_repository" "app_repo" {
-  name                 = "${var.region_name}-stockops-app-repo"
+  # 🌟 [에러 해결 핵심] 고정된 이름 대신, 주입된 상용 서비스 명칭 그대로 저장소를 개설합니다.
+  name                 = var.repository_name
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true

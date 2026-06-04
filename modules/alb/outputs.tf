@@ -17,6 +17,11 @@ output "frontend_tg_arn" {
   value       = aws_lb_target_group.frontend_tg.arn
 }
 
+output "admin_tg_arn" {
+  description = "관리자 대시보드(Admin Web) 대상 그룹 ARN"
+  value       = aws_lb_target_group.admin_tg.arn
+}
+
 output "spring_tg_arn" {
   description = "Spring 백엔드 타겟 그룹 ARN 주소"
   value       = aws_lb_target_group.spring_tg.arn

@@ -50,6 +50,26 @@ resource "aws_lb" "alb" {
   }
 }
 
+# 1. 관리자 웹 전용 대상 그룹 정의 (Nginx 기본 포트 80 수용)
+resource "aws_lb_target_group" "admin_tg" {
+  name        = "${var.region_name}-admin-tg"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip" # EKS Pod IP 다이렉트 타격 모드
+
+  health_check {
+    enabled             = true
+    path                = "/" # Nginx 루트 경로 헬스체크
+    port                = "80"
+    protocol            = "HTTP"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 3
+    unhealthy_threshold = 3
+  }
+}
+
 resource "aws_lb_target_group" "frontend_tg" {
   name        = "${var.region_name}-frontend-tg"
   port        = 80
@@ -79,7 +99,7 @@ resource "aws_lb_target_group" "spring_tg" {
 
   health_check {
     enabled             = true
-    path                = "/api/" # 상태 체크 경로
+    path                = "/actuator/health" # 상태 체크 경로
     port                = "8080"
     protocol            = "HTTP"
     interval            = 30
@@ -103,7 +123,7 @@ resource "aws_lb_target_group" "fastapi_tg" {
 
   health_check {
     enabled             = true
-    path                = "/ai/" # FastAPI 기본 Swagger 문서 경로 활용
+    path                = "/health" # FastAPI 기본 Swagger 문서 경로 활용
     port                = "8000"
     protocol            = "HTTP"
     interval            = 30
@@ -127,6 +147,23 @@ resource "aws_lb_listener" "http" {
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.frontend_tg.arn
+  }
+}
+
+resource "aws_lb_listener_rule" "admin_rule" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 85 # /api(90) 및 /ai(100)와 겹치지 않는 우선순위 부여
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.admin_tg.arn
+  }
+
+  condition {
+    path_pattern {
+      # 🌟 /admin 및 /admin/* 경로 유입 트래픽을 전담 마크합니다.
+      values = ["/admin", "/admin/*"]
+    }
   }
 }
 

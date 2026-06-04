@@ -22,3 +22,11 @@ output "cluster_security_group_id" {
   description = "EKS 클러스터가 자동 생성하여 노드들에 채워준 진짜 보안 그룹 ID"
   value       = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
 }
+
+output "lbc_role_arn" {
+  value = aws_iam_role.lbc.arn
+}
+
+output "lbc_role_policy_attachment" {
+  value = aws_iam_role_policy_attachment.lbc.id
+}

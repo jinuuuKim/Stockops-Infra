@@ -7,88 +7,154 @@
 ![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
 ![GitHub Actions](https://img.shields.io/badge/github%20actions-%232088FF.svg?style=for-the-badge&logo=githubactions&logoColor=white)
 
-본 저장소는 멀티 리전 및 멀티 클라우드 아키텍처를 기반으로 하는 **식품 ERP 애플리케이션(StockOps)**의 AWS 서울 리전 메인 프로덕션 인프라 테라폼(Terraform) 소스 코드입니다. 
+# StockOps — 멀티 하이브리드 클라우드 인프라
 
-1단계 인프라 고가용성 뼈대 구축을 완벽하게 마감하고, 현재 **실제 상용 애플리케이션 이식, External Secrets Operator(ESO) 보안 체계 도입 및 GitHub Actions 기반의 풀 오토메이션 CI/CD 파이프라인** 환경을 결합하는 고도화 단계(2단계)를 성공적으로 수행하고 있습니다.
+> **팀명**: 시선 (SysSun — System Surveillance & Unified Network)
+> **주제**: AX 환경을 위한 ERP 솔루션 기반 멀티 하이브리드 클라우드 인프라 자동화 및 Observability 체계 구축
 
----
-
-## ✨ 핵심 아키텍처 특징
-
-* **고가용성 네트워크 (VPC Multi-AZ):** 서울 리전(`ap-northeast-2`) 내 가용영역 2개(`2a`, `2c`)를 분할 활용하여 단일 데이터 센터 물리 장애에 대응하는 결함 허용(Fault-Tolerant) 아키텍처를 확립했습니다.
-* **쿠버네티스 오케스트레이션 (Amazon EKS):** 복잡한 컨테이너 생명주기를 안정적으로 관리하기 위해 Amazon EKS Managed Node Group을 도입했습니다. AWS 로드 밸런서 컨트롤러를 연동하여 가상 머신 제약이 없는 유연한 컨테이너 토폴로지를 제공합니다.
-* **IP 타겟 기반 L7 경로 분기 (ALB):** 단일 애플리케이션 로드 밸런서가 프라이빗 서브넷에 상주하는 개별 Pod의 사설 IP 주소로 트래픽을 정밀 타격하여 다이렉트 포워딩하는 `ip` 모드 라우팅을 채택했습니다. URL 경로 패턴에 따라 클라이언트 웹, 관리자 대시보드, 메인 API, AI 모듈로 완벽히 분기합니다.
-* **스토리지 자동 확장 데이터베이스 (RDS):** 외부 접근이 원천 차단된 사설 DB 서브넷 위에서 구동되는 고성능 RDS PostgreSQL입니다. 스마트 창고 센서 데이터 대량 유입 시 발생할 수 있는 디스크 용량 부족을 방지하기 위해 중단 없는 **스토리지 자동 확장(최대 100GB)** 인프라 기술을 결합했습니다.
+StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS 솔루션이다. 서울 본사가 운영을 총괄하고 미국 영업팀이 현지 영업을 지원하며, 멀티 리전·하이브리드 클라우드 위에서 동작한다.
 
 ---
 
-## 🔄 2단계: 프로덕션 애플리케이션 및 풀 오토메이션 가동 규격
+## 시나리오
 
-실제 운영 환경의 명세와 협업 파이프라인을 구축하기 위해 아래의 고도화 사양을 인프라에 완전 동기화했습니다.
+- **AWS 서울**: 본사. 한국 사용자 대상 메인 서비스
+- **AWS 오하이오**: 미국 영업팀 대상 서비스 (멀티 리전 확장 예정)
+- **온프레미스(한국)**: 센터/창고. 온도 센서 데이터 수집
+- **Azure 서울**: 백업 데이터 + 상시 로그 저장 (재해 복구용)
 
-### 1. 실서비스 전용 독립 네임스페이스 격리
-기존 `default` 공간의 보안 취약성을 극복하고 자원을 효율적으로 격리하기 위해 쿠버네티스 내부에 **`stockops`** 독립 네임스페이스를 개설하여 모든 상용 컴포넌트를 이중 보호합니다.
-
-### 2. 4대 마이크로서비스(MSA) 세부 라우팅 명세
-| URL 경로 패턴 | 연결 대상 컴포넌트 | 구동 포트 | 채택 기술 스택 |
-| :--- | :--- | :--- | :--- |
-| `http://ALB주소/` | **stockops-client-web** (사용자 포털) | 80 | React + Vite, Nginx |
-| `http://ALB주소/admin` | **stockops-admin-web** (관리자 웹) | 80 | React + Vite, Nginx |
-| `http://ALB주소/api` | **stockops-api-server** (백엔드 API) | 8080 | Spring Boot 3, Java 21 |
-| `http://ALB주소/ai` | **stockops-ai-module** (AI 재고 예측) | 8000 | Python FastAPI, Prophet |
-
-### 3. 클라우드 네이티브 보안 자격증명 연동 (ESO)
-쿠버네티스 파일에 DB 패스워드나 JWT 시크릿 키를 하드코딩하는 위험을 제거하기 위해 테라폼에 Helm 공급자를 결합하여 **`External Secrets Operator (ESO)`**를 자동 프로비저닝했습니다. 이를 통해 AWS Secrets Manager 내부의 기밀 데이터를 EKS 내부 Secret 자원으로 안전하게 실시간 미러링 동기화합니다.
+**데이터**: AWS RDS Multi-AZ / 서울(Master) ↔ 오하이오(Slave) 동기화, 미국은 읽기 전용 / Azure에 백업·로그
+**트래픽**: Global Accelerator 지연 기반 라우팅 (한국→서울, 미국→오하이오), 리전 장애 시 페일오버
+**보안**: 미국 영업팀은 최소 권한으로 앱/DB 접근 (본사 영향 차단)
 
 ---
 
-## 🔒 방화벽 신뢰 사슬 및 규칙 충돌 원천 차단
+## 레포 구성
 
-리소스 간의 보안 그룹(Security Group) 소스 참조 방식을 채택하였으며, 테라폼 엔진의 특성으로 인한 인프라 불안정성을 해결하기 위해 **100% 독립형 리소스 규칙(`aws_security_group_rule`) 분리 기법**으로 재설계했습니다.
+| 레포 | 내용 |
+|------|------|
+| **Stockops-Infra** | Terraform IaC (modules + seoul, 추후 ohio) |
+| **Stockops-Application** | 앱 모노레포 (admin-web, ai-module, api-server, client-web) + GitHub Actions |
 
-* **Flapping(덮어쓰기 경쟁) 해결:** 인라인 `ingress` 블록과 외부 리소스의 혼용을 완전 차단하여 AWS API 레이어의 방화벽 규칙 꼬임 현상을 무결점 방어했습니다.
-* **EKS 실제 방화벽 주입:** `target_type = "ip"` 구조에 맞추어 규칙의 목적지를 유령 방화벽이 아닌, 워커 노드들이 실제 착용하고 있는 **EKS 클러스터 고유 보안 그룹 ID(`cluster_security_group_id`)**로 정밀 타격 매핑했습니다.
+### 애플리케이션 컴포넌트
 
-```text
-[외부 인터넷 트래픽] 
-       │
-       ▼ (HTTP 80 / HTTPS 443 인바운드 성문 개방)
-┌────────────────────────────────────────────────────────┐
-│ 1. 로드 밸런서 보안 그룹 (seoul-alb-sg)                │
-│    - 프라이빗 Pod IP 타겟 노크를 위해 Egress 전면 개방   │
-└──────────────────────────┬─────────────────────────────┘
-                           │
-                           ▼ (오직 seoul-alb-sg를 통과한 패킷만 허용)
-┌────────────────────────────────────────────────────────┐
-│ 2. EKS 클러스터 실제 노드 방화벽 (Cluster Security Group) │
-│    - Client/Admin(80), Spring(8080), FastAPI(8000)     │
-└──────────────────────────┬─────────────────────────────┘
-                           │
-                           ▼ (오직 노드 방화벽 소스 및 VPC 사설망만 수용)
-┌────────────────────────────────────────────────────────┐
-│ 3. 데이터베이스 보안 그룹 (seoul-db-sg)                 │
-│    - RDS PostgreSQL (Port: 5432) 완전 격리 및 보호     │
-└────────────────────────────────────────────────────────┘
+| 컴포넌트 | 기술 | 포트 | ALB 경로 |
+|----------|------|------|----------|
+| client-web | React + nginx | 80 | `/` (default) |
+| admin-web | React + nginx | 80 | `/admin` |
+| api-server | Spring Boot 3.2.12 / Java 21 | 8080 | `/api` |
+| ai-module | FastAPI | 8000 | `/ai` |
+
+---
+
+## 배포 방법
+
+### 사전 준비
+- AWS CLI 자격증명 설정
+- kubectl, terraform 설치
+- `terraform.tfvars`에 `db_username`, `db_password`, `jwt_secret` 등 설정
+
+### 1. 인프라 배포
+
+```powershell
+cd seoul
+
+# 최초 구축 시: EKS 클러스터가 없으면 provider 연결 문제로
+# kubernetes_manifest/kubectl_manifest가 plan에서 실패할 수 있음.
+# 그 경우 인프라 먼저 → kubeconfig → 전체 순으로 분리 실행.
+
+# (A) 클러스터가 이미 있는 경우 — 한 방에
+terraform apply -auto-approve
+
+# (B) 완전 처음(클러스터 없음) — 단계 분리
+terraform apply --% -auto-approve -target=module.seoul_vpc -target=module.seoul_alb -target=module.seoul_eks -target=module.seoul_db -target=module.seoul_ecr
+aws eks update-kubeconfig --region ap-northeast-2 --name seoul-cluster
+terraform apply -auto-approve
 ```
 
-## 📂 디렉터리 구조 및 파일 역할 설명
-```text
-stockops-infra/
-├── .github/
-│   └── workflows/
-│       └── deploy.yml        # ⚙️ GitHub Actions CI/CD 마스터 파이프라인 명세서
-├── mock-ai/                  # [Mock FastAPI]
-├── mock-frontend/                  # [Mock Frontend]
-├── mock-backend/                  # [Mock Backend]
-├── modules/                  # [공통 인프라 패키지 틀] - 재사용 가능 모듈
-│   ├── vpc/                  # - 순수 고가용성 네트워크망 구성 모듈
-│   ├── alb/                  # - 순수 로드 밸런서 및 L7 경로 분기 규칙 모듈
-│   ├── eks/                  # - EKS Core 및 컴퓨팅 클러스터 관리 모듈
-│   └── db/                   # - 스토리지 자동 확장형 사설 데이터베이스 모듈
-│   └── ecr/                  # - 프라이빗 ECR 레포지토리
-└── seoul/                    # [서울 리전 실제 배포 구역] - 실행 센터
-    ├── provider.tf           # - AWS 공급자 및 Helm/Kubernetes 자격증명 정의
-    ├── main.tf               # - 모듈들을 순서대로 호출하여 조립하는 마스터 파일
-    ├── security_groups.tf    # - 완벽하게 분리된 독립형 방화벽 규칙 집중 관리 파일
-    └── kubernetes.tf         # - stockops 네임스페이스 및 실서비스 Pod 명세 제어 파일
+> `wait_for_rollout = false` 설정으로 deployment는 이미지가 없어도 apply가 멈추지 않는다.
+
+### 2. Kubernetes Secret 생성
+
+```powershell
+kubectl create secret generic stockops-secret `
+  --from-literal=JWT_SECRET="<랜덤32자이상>" `
+  --from-literal=DB_USERNAME="<DB유저>" `
+  --from-literal=DB_PASSWORD="<DB비번>" `
+  -n stockops
 ```
+
+### 3. 애플리케이션 이미지 배포 (GitHub Actions)
+
+ECR 리포가 생성된 뒤, Stockops-Application의 GitHub Actions로 이미지를 빌드/푸시한다.
+
+```powershell
+# main 브랜치 push 또는 수동 트리거
+gh workflow run deploy.yml
+```
+
+이미지가 ECR에 올라오면 ImagePullBackOff 상태였던 Pod가 자동으로 다시 pull → Running.
+
+### 4. 검증
+
+```powershell
+kubectl get pods -n stockops
+kubectl get targetgroupbinding -n stockops
+# api 헬스체크
+kubectl exec -it <api-pod> -n stockops -- curl -s localhost:8080/actuator/health
+```
+
+ALB DNS로 접속:
+```powershell
+aws elbv2 describe-load-balancers --names seoul-alb --query "LoadBalancers[0].DNSName" --output text
+```
+
+### 5. 초기 로그인 계정
+
+앱 기동 시 `AuthDataLoader`가 admin 계정을 자동 시드한다.
+- 이메일: `admin@stockops.com`
+- 비밀번호: `admin123`
+
+테스트 계정(manager/staff/user)은 `STOCKOPS_TEST_ACCOUNTS_PASSWORD` 환경변수 설정 시에만 생성된다.
+
+---
+
+## 종료 (destroy)
+
+```powershell
+# TGB 먼저 (LBC 살아있을 때)
+terraform destroy --% -auto-approve -target=kubectl_manifest.client_tgb -target=kubectl_manifest.admin_tgb -target=kubectl_manifest.api_tgb -target=kubectl_manifest.ai_tgb
+
+# 전체
+terraform destroy -auto-approve
+
+# destroy가 막히면 TGB 수동 삭제 후 재시도
+kubectl delete targetgroupbinding --all -n stockops
+```
+
+### destroy 후 잔재 확인 (중요)
+
+```powershell
+# IAM Role — Terraform이 추적 못 하면 재구축 시 "already exists" 발생
+aws iam list-roles --query "Roles[?contains(RoleName, 'seoul')].RoleName" --output table
+
+# 과금 리소스
+aws ec2 describe-nat-gateways --filter "Name=state,Values=available" --query "NatGateways[*].NatGatewayId" --output table
+aws rds describe-db-instances --query "DBInstances[*].DBInstanceIdentifier" --output table
+aws elbv2 describe-load-balancers --query "LoadBalancers[*].LoadBalancerName" --output table
+```
+
+남을 수 있는 IAM: `seoul-eks-cluster-role`, `seoul-eks-node-role`, `seoul-lbc-role`, 커스텀 정책 `seoul-lbc-policy`. 정책을 detach 후 role 삭제.
+
+---
+
+## 추가 예정 (로드맵)
+
+- **호스트 분리**: Route 53 + ACM으로 `admin.도메인` / `client.도메인` 분리 → 서브패스 쿠키 문제 근본 해결
+- **멀티 리전**: 오하이오 리전 확장 + ECR replication
+- **Secrets Manager**: ESO(설치됨) 연동으로 DB/JWT 시크릿 자동 동기화, RDS `manage_master_user_password`
+- **온프레미스 연동**: Site-to-Site VPN
+- **센서 파이프라인**: IoT Core → SQS → 백엔드 분석
+- **기타**: S3, Global Accelerator, Observability 스택
+
+자세한 아키텍처는 `ARCHITECTURE.md`, AWS 리소스 목록은 `AWS_RESOURCES.md` 참고.
