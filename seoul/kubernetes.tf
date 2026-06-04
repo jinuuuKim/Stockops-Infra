@@ -1,248 +1,180 @@
-# ==========================================
-# 0. 프로바이더 버전 고정 (공식 정품 구성으로 원상 복구)
-# ==========================================
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.0"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.0"
-    }
+# ==========================================================================
+# 서울 EKS 클러스터 - 상용 애플리케이션 및 인프라 컴포넌트 배치 명세서 (문법 교정판)
+# ==========================================================================
+
+# 1. 실서비스 전용 독립 네임스페이스 개설
+resource "kubernetes_namespace_v1" "stockops" {
+  metadata {
+    name = "stockops"
   }
 }
 
-# ==========================================
-# 1. EKS 모듈 출력값을 활용한 동적 프로바이더 초기화 (AWS 정석 exec 인증)
-# ==========================================
-provider "kubernetes" {
-  host                   = module.seoul_eks.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.seoul_eks.cluster_ca_certificate)
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-    command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", module.seoul_eks.cluster_name]
-  }
-}
-
-provider "helm" {
-  kubernetes {
-    host                   = module.seoul_eks.cluster_endpoint
-    cluster_ca_certificate = base64decode(module.seoul_eks.cluster_ca_certificate)
-    exec {
-      api_version = "client.authentication.k8s.io/v1beta1"
-      command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", module.seoul_eks.cluster_name]
-    }
-  }
-}
-
-# ==========================================
-# 2. IRSA 자격 증명 인프라 아키텍처 구현 (OIDC & IAM Role)
-# ==========================================
-data "tls_certificate" "seoul_eks" {
-  url = module.seoul_eks.oidc_issuer
-}
-
-resource "aws_iam_openid_connect_provider" "seoul_eks_oidc" {
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = [data.tls_certificate.seoul_eks.certificates[0].sha1_fingerprint]
-  url             = module.seoul_eks.oidc_issuer
-}
-
-resource "aws_iam_policy" "aws_lb_controller_policy" {
-  name        = "seoul-aws-lb-controller-policy"
-  path        = "/"
-  description = "IAM policy for AWS Load Balancer Controller on EKS"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "iam:CreateServiceLinkedRole",
-          "ec2:DescribeAccountAttributes",
-          "ec2:DescribeAddresses",
-          "ec2:DescribeAvailabilityZones",
-          "ec2:DescribeInternetGateways",
-          "ec2:DescribeVpcPeeringConnections",
-          "ec2:DescribeSubnets",
-          "ec2:DescribeSecurityGroups",
-          "ec2:DescribeValidations",
-          "ec2:DescribeVpcs",
-          "elasticloadbalancing:*"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role" "aws_lb_controller_role" {
-  name = "seoul-aws-lb-controller-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Federated = aws_iam_openid_connect_provider.seoul_eks_oidc.arn
-        }
-        Action = "sts:AssumeRoleWithWebIdentity"
-        Condition = {
-          StringEquals = {
-            "${replace(aws_iam_openid_connect_provider.seoul_eks_oidc.url, "https://", "")}:sub" = "system:serviceaccount:kube-system:aws-load-balancer-controller"
-          }
-        }
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "aws_lb_controller_attach" {
-  policy_arn = aws_iam_policy.aws_lb_controller_policy.arn
-  role       = aws_iam_role.aws_lb_controller_role.name
-}
-
-# ==========================================
-# 3. AWS Load Balancer Controller Helm 자동 설치
-# ==========================================
-resource "helm_release" "aws_lb_controller" {
-  name       = "aws-load-balancer-controller"
-  repository = "https://aws.github.io/eks-charts"
-  chart      = "aws-load-balancer-controller"
-  namespace  = "kube-system"
+# 2. External Secrets Operator (ESO) 보안 컨트롤러 자동 배포
+resource "helm_release" "external_secrets" {
+  name             = "external-secrets"
+  repository       = "https://charts.external-secrets.io"
+  chart            = "external-secrets"
+  namespace        = "external-secrets"
+  create_namespace = true
 
   set {
-    name  = "clusterName"
-    value = module.seoul_eks.cluster_name
-  }
-
-  set {
-    name  = "vpcId"
-    value = module.seoul_vpc.vpc_id
-  }
-
-  set {
-    name  = "region"
-    value = "ap-northeast-2"
-  }
-
-  set {
-    name  = "serviceAccount.create"
+    name  = "installCRDs"
     value = "true"
   }
-
-  set {
-    name  = "serviceAccount.name"
-    value = "aws-load-balancer-controller"
-  }
-
-  set {
-    name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-    value = aws_iam_role.aws_lb_controller_role.arn
-  }
 }
 
-# seoul/kubernetes.tf 파일 하단 영역 교체
-
-# ==========================================
-# 4. 인프라 테스트용 메인 백엔드 (Spring 포트 8080 - ECR 실제 이미지 연동)
-# ==========================================
-resource "kubernetes_deployment_v1" "stockops_spring" {
+# --------------------------------------------------------------------------
+# [컴포넌트 1] stockops-client-web (사용자 포털 - Port 80)
+# --------------------------------------------------------------------------
+resource "kubernetes_deployment_v1" "client_web" {
   metadata {
-    name      = "stockops-spring-backend"
-    namespace = "default"
-    labels    = { app = "stockops-spring" }
+    name      = "stockops-client-web"
+    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+    labels    = { app = "stockops-client-web" }
   }
-
   spec {
-    replicas = 2
-    selector { match_labels = { app = "stockops-spring" } }
-
+    replicas = 1
+    selector { match_labels = { app = "stockops-client-web" } }
     template {
-      metadata { labels = { app = "stockops-spring" } }
+      metadata { labels = { app = "stockops-client-web" } }
       spec {
         container {
-          name  = "spring-container"
-          # 🌟 [ECR 이미지 연동] 방금 푸시하신 백엔드 실제 이미지 주소로 교체합니다.
-          image = "247385839803.dkr.ecr.ap-northeast-2.amazonaws.com/seoul-stockops-app-repo:backend"
-          
-          # 🌟 [포트 정석 복원] 도커파일 명세에 맞춰 내부 8080 포트를 개방합니다.
-          port { container_port = 8080 } 
+          name              = "client-web-container"
+          image             = "247385839803.dkr.ecr.ap-northeast-2.amazonaws.com/stockops-client-web:latest"
+          image_pull_policy = "Always"
+          port { container_port = 80 }
         }
       }
     }
   }
 }
 
-resource "kubernetes_service_v1" "stockops_spring_svc" {
+resource "kubernetes_service_v1" "client_web_svc" {
   metadata {
-    name      = "stockops-spring-service"
-    namespace = "default"
+    name      = "stockops-client-web-svc"
+    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
   }
   spec {
-    selector = { app = "stockops-spring" }
+    selector = { app = "stockops-client-web" }
+    # 🌟 [문법 교정] 테라폼 정석 규칙에 맞추어 줄바꿈(개행) 형태로 분리했습니다.
     port {
-      port        = 8080
-      target_port = 8080 # 🌟 컨테이너 내부 8080 포트로 정상 포워딩합니다.
-      protocol    = "TCP"
+      port        = 80
+      target_port = 80
     }
     type = "ClusterIP"
   }
 }
 
-resource "kubernetes_manifest" "spring_tgb" {
-  manifest = {
-    apiVersion = "elbv2.k8s.aws/v1beta1"
-    kind       = "TargetGroupBinding"
-    metadata = {
-      name      = "stockops-spring-tgb"
-      namespace = "default"
-    }
-    spec = {
-      serviceRef = {
-        name = kubernetes_service_v1.stockops_spring_svc.metadata[0].name
-        port = 8080
-      }
-      targetGroupARN = module.seoul_alb.spring_tg_arn
-    }
-  }
-  depends_on = [helm_release.aws_lb_controller]
-}
-
-# ==========================================
-# 5. 인프라 테스트용 AI 분석 백엔드 (FastAPI 포트 8000 - 우회 유지)
-# ==========================================
-# seoul/kubernetes.tf 파일 내부의 5번 FastAPI 리소스 양식
-
-resource "kubernetes_deployment_v1" "stockops_fastapi" {
+# --------------------------------------------------------------------------
+# [컴포넌트 2] stockops-admin-web (관리자 웹 - Port 80)
+# --------------------------------------------------------------------------
+resource "kubernetes_deployment_v1" "admin_web" {
   metadata {
-    name      = "stockops-fastapi-backend"
-    namespace = "default"
-    labels    = { app = "stockops-fastapi" }
+    name      = "stockops-admin-web"
+    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+    labels    = { app = "stockops-admin-web" }
   }
-
   spec {
-    replicas = 2
-    selector { match_labels = { app = "stockops-fastapi" } }
-
+    replicas = 1
+    selector { match_labels = { app = "stockops-admin-web" } }
     template {
-      metadata { labels = { app = "stockops-fastapi" } }
+      metadata { labels = { app = "stockops-admin-web" } }
       spec {
         container {
-          name  = "fastapi-container"
-          # 🌟 [확인] 이 주소가 nginx:alpine이 아니라 아래 ECR 주소여야 합니다!
-          image = "247385839803.dkr.ecr.ap-northeast-2.amazonaws.com/seoul-stockops-app-repo:ai"
-          
+          name              = "admin-web-container"
+          image             = "247385839803.dkr.ecr.ap-northeast-2.amazonaws.com/stockops-admin-web:latest"
+          image_pull_policy = "Always"
+          port { container_port = 80 }
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_service_v1" "admin_web_svc" {
+  metadata {
+    name      = "stockops-admin-web-svc"
+    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+  }
+  spec {
+    selector = { app = "stockops-admin-web" }
+    # 🌟 [문법 교정] 줄바꿈 형태로 정렬 완료
+    port {
+      port        = 80
+      target_port = 80
+    }
+    type = "ClusterIP"
+  }
+}
+
+# --------------------------------------------------------------------------
+# [컴포넌트 3] stockops-api-server (메인 Spring 백엔드 - Port 8080)
+# --------------------------------------------------------------------------
+resource "kubernetes_deployment_v1" "api_server" {
+  metadata {
+    name      = "stockops-api"
+    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+    labels    = { app = "stockops-api" }
+  }
+  spec {
+    replicas = 1
+    selector { match_labels = { app = "stockops-api" } }
+    template {
+      metadata { labels = { app = "stockops-api" } }
+      spec {
+        container {
+          name              = "api-container"
+          image             = "247385839803.dkr.ecr.ap-northeast-2.amazonaws.com/stockops-api:latest"
+          readiness_probe {
+            http_get {
+              path = "/api/health" # 혹은 실제 존재하는 헬스체크 경로
+              port = 8080
+            }
+            initial_delay_seconds = 60 # 60초간 대기
+            period_seconds        = 10
+          }
+          image_pull_policy = "Always"
+          port { container_port = 8080 }
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_service_v1" "api_server_svc" {
+  metadata {
+    name      = "stockops-api-svc"
+    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+  }
+  spec {
+    selector = { app = "stockops-api" }
+    # 🌟 [문법 교정] 줄바꿈 형태로 정렬 완료
+    port {
+      port        = 8080
+      target_port = 8080
+    }
+    type = "ClusterIP"
+  }
+}
+
+# --------------------------------------------------------------------------
+# [컴포넌트 4] stockops-ai-module (FastAPI AI 분석 - Port 8000)
+# --------------------------------------------------------------------------
+resource "kubernetes_deployment_v1" "ai_module" {
+  metadata {
+    name      = "stockops-ai"
+    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+    labels    = { app = "stockops-ai" }
+  }
+  spec {
+    replicas = 1
+    selector { match_labels = { app = "stockops-ai" } }
+    template {
+      metadata { labels = { app = "stockops-ai" } }
+      spec {
+        container {
+          name              = "ai-container"
+          image             = "247385839803.dkr.ecr.ap-northeast-2.amazonaws.com/stockops-ai:latest"
           image_pull_policy = "Always"
           port { container_port = 8000 }
         }
@@ -251,100 +183,98 @@ resource "kubernetes_deployment_v1" "stockops_fastapi" {
   }
 }
 
-resource "kubernetes_service_v1" "stockops_fastapi_svc" {
+resource "kubernetes_service_v1" "ai_module_svc" {
   metadata {
-    name      = "stockops-fastapi-service"
-    namespace = "default"
+    name      = "stockops-ai-svc"
+    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
   }
   spec {
-    selector = { app = "stockops-fastapi" }
+    selector = { app = "stockops-ai" }
+    # 🌟 [문법 교정] 줄바꿈 형태로 정렬 완료
     port {
       port        = 8000
       target_port = 8000
-      protocol    = "TCP"
     }
     type = "ClusterIP"
   }
 }
 
-resource "kubernetes_manifest" "fastapi_tgb" {
+# ==========================================================================
+# 상용 4대 컴포넌트 전용 AWS TargetGroupBinding 매핑 연동 (대소문자 규격 교정본)
+# ==========================================================================
+
+resource "kubernetes_manifest" "client_tgb" {
   manifest = {
     apiVersion = "elbv2.k8s.aws/v1beta1"
     kind       = "TargetGroupBinding"
     metadata = {
-      name      = "stockops-fastapi-tgb"
-      namespace = "default"
+      name      = "stockops-client-tgb"
+      namespace = kubernetes_namespace_v1.stockops.metadata[0].name
     }
     spec = {
       serviceRef = {
-        name = kubernetes_service_v1.stockops_fastapi_svc.metadata[0].name
-        port = 8000
-      }
-      targetGroupARN = module.seoul_alb.fastapi_tg_arn
-    }
-  }
-  depends_on = [helm_release.aws_lb_controller]
-}
-
-# ==========================================
-# 6. 인프라 테스트용 프론트엔드 (React Mock 포트 80 - ECR 실제 이미지 연동)
-# ==========================================
-resource "kubernetes_deployment_v1" "stockops_frontend" {
-  metadata {
-    name      = "stockops-frontend"
-    namespace = "default"
-    labels    = { app = "stockops-frontend" }
-  }
-
-  spec {
-    replicas = 2
-    selector { match_labels = { app = "stockops-frontend" } }
-
-    template {
-      metadata { labels = { app = "stockops-frontend" } }
-      spec {
-        container {
-          name  = "frontend-container"
-          # 🌟 [ECR 이미지 연동] 방금 푸시하신 프론트엔드 실제 이미지 주소로 교체합니다.
-          image = "247385839803.dkr.ecr.ap-northeast-2.amazonaws.com/seoul-stockops-app-repo:frontend"
-          port { container_port = 80 }
-        }
-      }
-    }
-  }
-}
-
-resource "kubernetes_service_v1" "stockops_frontend_svc" {
-  metadata {
-    name      = "stockops-frontend-service"
-    namespace = "default"
-  }
-  spec {
-    selector = { app = "stockops-frontend" }
-    port {
-      port        = 80
-      target_port = 80
-      protocol    = "TCP"
-    }
-    type = "ClusterIP"
-  }
-}
-
-resource "kubernetes_manifest" "frontend_snapshot_tgb" {
-  manifest = {
-    apiVersion = "elbv2.k8s.aws/v1beta1"
-    kind       = "TargetGroupBinding"
-    metadata = {
-      name      = "stockops-frontend-tgb"
-      namespace = "default"
-    }
-    spec = {
-      serviceRef = {
-        name = kubernetes_service_v1.stockops_frontend_svc.metadata[0].name
+        name = kubernetes_service_v1.client_web_svc.metadata[0].name
         port = 80
       }
+      # 🌟 [스키마 충돌 해결] targetGroupArn 을 targetGroupARN (대문자)으로 전면 수정합니다.
       targetGroupARN = module.seoul_alb.frontend_tg_arn
     }
   }
-  depends_on = [helm_release.aws_lb_controller]
+}
+
+resource "kubernetes_manifest" "admin_tgb" {
+  manifest = {
+    apiVersion = "elbv2.k8s.aws/v1beta1"
+    kind       = "TargetGroupBinding"
+    metadata = {
+      name      = "stockops-admin-tgb"
+      namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+    }
+    spec = {
+      serviceRef = {
+        name = kubernetes_service_v1.admin_web_svc.metadata[0].name
+        port = 80
+      }
+      # 🌟 [스키마 충돌 해결] targetGroupARN 대문자 적용
+      targetGroupARN = module.seoul_alb.admin_tg_arn
+    }
+  }
+}
+
+resource "kubernetes_manifest" "api_tgb" {
+  manifest = {
+    apiVersion = "elbv2.k8s.aws/v1beta1"
+    kind       = "TargetGroupBinding"
+    metadata = {
+      name      = "stockops-api-tgb"
+      namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+    }
+    spec = {
+      serviceRef = {
+        name = kubernetes_service_v1.api_server_svc.metadata[0].name
+        port = 8080
+      }
+      # 🌟 [스키마 충돌 해결] targetGroupARN 대문자 적용
+      targetGroupARN = module.seoul_alb.spring_tg_arn
+    }
+  }
+}
+
+resource "kubernetes_manifest" "ai_tgb" {
+  manifest = {
+    apiVersion = "elbv2.k8s.aws/v1beta1"
+    kind       = "TargetGroupBinding"
+    metadata = {
+      name      = "stockops-ai-tgb"
+      namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+    }
+    spec = {
+      serviceRef = {
+        name = kubernetes_service_v1.ai_module_svc.metadata[0].name
+        port = 8000
+      }
+      # 🌟 [스키마 충돌 해결] targetGroupARN 대문자 적용
+      targetGroupARN = module.seoul_alb.fastapi_tg_arn
+    }
+  }
 }

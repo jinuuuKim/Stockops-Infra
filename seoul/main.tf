@@ -48,6 +48,16 @@ module "seoul_db" {
 
 # 5. Gitea 소스 코드 빌드 이미지 보관을 위한 서울 ECR 배포 (컨테이너 저장소)
 module "seoul_ecr" {
-  source      = "../modules/ecr"
-  region_name = "seoul"
+  source   = "../modules/ecr"
+  
+  # 🌟 테라폼 for_each 기술로 4개의 이름을 순회하며 모듈을 4번 자동 가동합니다.
+  for_each = toset([
+    "stockops-api",
+    "stockops-ai",
+    "stockops-admin-web",
+    "stockops-client-web"
+  ])
+
+  region_name     = "seoul"
+  repository_name = each.value # 🌟 순회 중인 이름(예: stockops-api 등)을 모듈에 다이렉트 주입!
 }

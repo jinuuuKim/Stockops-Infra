@@ -12,7 +12,7 @@ output "seoul_database_host" {
   value       = module.seoul_db.db_address
 }
 
-output "stockops_app_ecr_url" {
-  description = "Gitea 소스 코드를 빌드하여 푸시할 AWS ECR 프라이빗 저장소 주소"
-  value       = module.seoul_ecr.repository_url
+output "stockops_ecr_urls" {
+  description = "MSA 4대 컴포넌트 전용 ECR 저장소 URL 전체 목록"
+  value       = { for k, v in module.seoul_ecr : k => v.repository_url }
 }
