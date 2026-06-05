@@ -190,7 +190,7 @@ resource "kubernetes_deployment_v1" "api_server" {
           }
           env {
             name  = "STOCKOPS_DATASOURCE_URL"
-            value = "jdbc:postgresql://seoul-rds-postgres.c5e4wugga45r.ap-northeast-2.rds.amazonaws.com:5432/stockops"
+            value = "jdbc:postgresql://${module.seoul_db.db_address}:5432/stockops"
           }
           env {
             name = "STOCKOPS_DATASOURCE_USERNAME"

@@ -21,7 +21,9 @@ resource "aws_subnet" "pub_sub_2a" {
   map_public_ip_on_launch = true # 이 서브넷 내 자원은 자동 퍼블릭 IP 부여
 
   tags = {
-    Name = "${var.region_name}-pub-sub-2a"
+    Name                                  = "${var.region_name}-pub-sub-2a"
+    "kubernetes.io/role/elb"              = "1"
+    "kubernetes.io/cluster/seoul-cluster" = "shared"
   }
 }
 
@@ -32,7 +34,9 @@ resource "aws_subnet" "pub_sub_2c" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name = "${var.region_name}-pub-sub-2c"
+    Name                                  = "${var.region_name}-pub-sub-2c"
+    "kubernetes.io/role/elb"              = "1"
+    "kubernetes.io/cluster/seoul-cluster" = "shared"
   }
 }
 
@@ -43,7 +47,9 @@ resource "aws_subnet" "priv_app_sub_2a" {
   availability_zone = var.az_a
 
   tags = {
-    Name = "${var.region_name}-priv-app-2a"
+    Name                                  = "${var.region_name}-priv-app-2a"
+    "kubernetes.io/role/internal-elb"     = "1"
+    "kubernetes.io/cluster/seoul-cluster" = "shared"
   }
 }
 
@@ -53,7 +59,9 @@ resource "aws_subnet" "priv_app_sub_2c" {
   availability_zone = var.az_c
 
   tags = {
-    Name = "${var.region_name}-priv-app-2c"
+    Name                                  = "${var.region_name}-priv-app-2c"
+    "kubernetes.io/role/internal-elb"     = "1"
+    "kubernetes.io/cluster/seoul-cluster" = "shared"
   }
 }
 
