@@ -16,3 +16,17 @@ output "stockops_ecr_urls" {
   description = "MSA 4대 컴포넌트 전용 ECR 저장소 URL 전체 목록"
   value       = { for k, v in module.seoul_ecr : k => v.repository_url }
 }
+
+output "github_actions_role_arn" {
+  value = module.github_oidc.role_arn
+}
+
+output "certificate_pem" {
+  value     = module.seoul_iot.certificate_pem
+  sensitive = true
+}
+
+output "private_key" {
+  value     = module.seoul_iot.private_key
+  sensitive = true
+}
