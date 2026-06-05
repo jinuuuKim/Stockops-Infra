@@ -75,7 +75,7 @@ resource "kubernetes_deployment_v1" "client_web" {
       spec {
         container {
           name              = "client-web-container"
-          image             = "247385839803.dkr.ecr.ap-northeast-2.amazonaws.com/stockops-client-web:latest"
+          image = "${module.seoul_ecr["stockops-client-web"].repository_url}:latest"
           image_pull_policy = "Always"
           port { container_port = 80 }
         }
@@ -118,7 +118,7 @@ resource "kubernetes_deployment_v1" "admin_web" {
       spec {
         container {
           name              = "admin-web-container"
-          image             = "247385839803.dkr.ecr.ap-northeast-2.amazonaws.com/stockops-admin-web:latest"
+          image = "${module.seoul_ecr["stockops-admin-web"].repository_url}:latest"
           image_pull_policy = "Always"
           port { container_port = 80 }
         }
@@ -161,7 +161,7 @@ resource "kubernetes_deployment_v1" "api_server" {
       spec {
         container {
           name              = "api-container"
-          image             = "247385839803.dkr.ecr.ap-northeast-2.amazonaws.com/stockops-api:latest"
+          image = "${module.seoul_ecr["stockops-api"].repository_url}:latest"
           
           env {
             name = "JWT_SECRET"
@@ -268,7 +268,7 @@ resource "kubernetes_deployment_v1" "ai_module" {
       spec {
         container {
           name              = "ai-container"
-          image             = "247385839803.dkr.ecr.ap-northeast-2.amazonaws.com/stockops-ai:latest"
+          image = "${module.seoul_ecr["stockops-ai"].repository_url}:latest"
           image_pull_policy = "Always"
           port { container_port = 8000 }
         }

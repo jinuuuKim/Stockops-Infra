@@ -23,6 +23,7 @@ terraform {
 
 provider "aws" {
   region = "ap-northeast-2"
+  profile = "siseon"
 }
 
 # --------------------------------------------------------------------------
@@ -37,7 +38,7 @@ provider "kubernetes" {
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", "seoul-cluster"]
+    args        = ["eks", "get-token", "--cluster-name", "seoul-cluster", "--profile", "siseon"]
   }
 }
 
@@ -52,7 +53,7 @@ provider "helm" {
     exec {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", "seoul-cluster"]
+      args        = ["eks", "get-token", "--cluster-name", "seoul-cluster", "--profile", "siseon"]
     }
   }
 }
@@ -65,6 +66,6 @@ provider "kubectl" {
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", "seoul-cluster"]
+    args        = ["eks", "get-token", "--cluster-name", "seoul-cluster", "--profile", "siseon"]
   }
 }
