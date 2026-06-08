@@ -1,23 +1,22 @@
 # ==========================================================================
-# IoT Core 모듈
-# 흐름: Sensimul → Mosquitto → [브리지] → AWS IoT Core → Rule → SQS → 백엔드
+# IoT Core 모듈 — 센서 데이터 파이프라인
+# 흐름: 온프레미스 센서 → Mosquitto 브리지 → IoT Core → Rule → SQS → 백엔드
 # ==========================================================================
 
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
-# ── 1. IoT Thing ──────────────────────────────
+# IoT Thing
 resource "aws_iot_thing" "bridge" {
   name = var.thing_name
 }
 
-# ── 2. 인증서 (Terraform이 생성, 파일로 출력) ──
+# X.509 인증서 (Terraform 생성, apply 후 팀장님께 전달)
 resource "aws_iot_certificate" "bridge" {
   active = true
 }
 
-# ── 3. IoT 정책 ───────────────────────────────
-# mosquitto-bridge client_id로 Connect + sensimul/sites/* Publish 허용
+# IoT 정책 (Connect + Publish 허용)
 resource "aws_iot_policy" "bridge" {
   name = "${var.thing_name}-policy"
 
@@ -33,12 +32,12 @@ resource "aws_iot_policy" "bridge" {
         Effect   = "Allow"
         Action   = "iot:Publish"
         Resource = "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:topic/${var.topic_prefix}/*"
-      }
+      },
     ]
   })
 }
 
-# ── 4. Thing ↔ 인증서 ↔ 정책 연결 ────────────
+# Thing ↔ 인증서 ↔ 정책 연결
 resource "aws_iot_thing_principal_attachment" "bridge" {
   thing     = aws_iot_thing.bridge.name
   principal = aws_iot_certificate.bridge.arn
@@ -49,7 +48,7 @@ resource "aws_iot_policy_attachment" "bridge" {
   target = aws_iot_certificate.bridge.arn
 }
 
-# ── 5. SQS DLQ ────────────────────────────────
+# SQS Dead Letter Queue
 resource "aws_sqs_queue" "sensor_dlq" {
   name                      = var.sqs_dlq_name
   message_retention_seconds = 1209600 # 14일
@@ -60,7 +59,7 @@ resource "aws_sqs_queue" "sensor_dlq" {
   }
 }
 
-# ── 6. SQS 메인 큐 ────────────────────────────
+# SQS 메인 큐
 resource "aws_sqs_queue" "sensor_data" {
   name                       = var.sqs_queue_name
   message_retention_seconds  = 86400 # 1일
@@ -77,7 +76,7 @@ resource "aws_sqs_queue" "sensor_data" {
   }
 }
 
-# IoT Rule이 SQS에 쓸 수 있도록 큐 정책 허용
+# IoT Rule이 SQS에 메시지를 쓸 수 있도록 큐 정책 허용
 resource "aws_sqs_queue_policy" "sensor_data" {
   queue_url = aws_sqs_queue.sensor_data.id
 
@@ -94,12 +93,12 @@ resource "aws_sqs_queue_policy" "sensor_data" {
             "aws:SourceArn" = "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:rule/*"
           }
         }
-      }
+      },
     ]
   })
 }
 
-# ── 7. IoT Rule용 IAM Role ────────────────────
+# IoT Rule용 IAM Role
 data "aws_iam_policy_document" "iot_rule_trust" {
   statement {
     effect  = "Allow"
@@ -131,16 +130,15 @@ resource "aws_iam_role_policy" "iot_rule_sqs" {
         Effect   = "Allow"
         Action   = "sqs:SendMessage"
         Resource = aws_sqs_queue.sensor_data.arn
-      }
+      },
     ]
   })
 }
 
-# ── 8. IoT Rule ───────────────────────────────
-# sensimul/sites/+/sensors/+ 토픽의 모든 메시지를 SQS로 전달
+# IoT Topic Rule (sensimul/sites/+/sensors/+ → SQS)
 resource "aws_iot_topic_rule" "sensor_to_sqs" {
   name        = "stockops_sensor_to_sqs"
-  description = "센시뮬 센서 데이터를 SQS로 라우팅"
+  description = "센서 데이터를 SQS로 라우팅"
   enabled     = true
   sql         = "SELECT *, topic() as mqtt_topic FROM '${var.topic_prefix}/+/sensors/+'"
   sql_version = "2016-03-23"
@@ -151,7 +149,6 @@ resource "aws_iot_topic_rule" "sensor_to_sqs" {
     use_base64 = false
   }
 
-  # Rule 실패 시 DLQ로
   error_action {
     sqs {
       queue_url  = aws_sqs_queue.sensor_dlq.url

@@ -1,9 +1,8 @@
 # ==========================================================================
-# ECR 모듈 - 메인 프라이빗 저장소 및 수명주기 정책 정의 (Main)
+# ECR 모듈 — 프라이빗 컨테이너 이미지 저장소
 # ==========================================================================
 
 resource "aws_ecr_repository" "app_repo" {
-  # 🌟 [에러 해결 핵심] 고정된 이름 대신, 주입된 상용 서비스 명칭 그대로 저장소를 개설합니다.
   name                 = var.repository_name
   image_tag_mutability = "MUTABLE"
   force_delete         = true
@@ -17,6 +16,7 @@ resource "aws_ecr_repository" "app_repo" {
   }
 }
 
+# 최신 10개 이미지만 유지, 이전 이미지 자동 삭제
 resource "aws_ecr_lifecycle_policy" "app_repo_policy" {
   repository = aws_ecr_repository.app_repo.name
 
@@ -25,7 +25,7 @@ resource "aws_ecr_lifecycle_policy" "app_repo_policy" {
     "rules": [
         {
             "rulePriority": 1,
-            "description": "최신 10개 이미지만 남기고 오래된 이미지는 자동 삭제하여 비용 절감",
+            "description": "최신 10개 이미지만 유지",
             "selection": {
                 "tagStatus": "any",
                 "countType": "imageCountMoreThan",

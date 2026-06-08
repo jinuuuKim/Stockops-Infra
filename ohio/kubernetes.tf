@@ -1,25 +1,11 @@
 # ==========================================================================
-# 서울 리전 — Kubernetes 리소스 정의
+# 오하이오 리전 — Kubernetes 리소스 정의
 # ==========================================================================
 
 # stockops 전용 네임스페이스
 resource "kubernetes_namespace_v1" "stockops" {
   metadata {
     name = "stockops"
-  }
-}
-
-# External Secrets Operator (ESO)
-resource "helm_release" "external_secrets" {
-  name             = "external-secrets"
-  repository       = "https://charts.external-secrets.io"
-  chart            = "external-secrets"
-  namespace        = "external-secrets"
-  create_namespace = true
-
-  set {
-    name  = "installCRDs"
-    value = "true"
   }
 }
 
@@ -32,15 +18,15 @@ resource "helm_release" "aws_load_balancer_controller" {
 
   set {
     name  = "clusterName"
-    value = "seoul-cluster"
+    value = "ohio-cluster"
   }
   set {
     name  = "vpcId"
-    value = module.seoul_vpc.vpc_id
+    value = module.ohio_vpc.vpc_id
   }
   set {
     name  = "region"
-    value = "ap-northeast-2"
+    value = "us-east-2"
   }
   set {
     name  = "serviceAccount.create"
@@ -52,28 +38,13 @@ resource "helm_release" "aws_load_balancer_controller" {
   }
   set {
     name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-    value = module.seoul_eks.lbc_role_arn
+    value = module.ohio_eks.lbc_role_arn
   }
 
-  depends_on = [module.seoul_eks]
+  depends_on = [module.ohio_eks]
 }
 
-# ArgoCD
-resource "helm_release" "argocd" {
-  name             = "argocd"
-  repository       = "https://argoproj.github.io/argo-helm"
-  chart            = "argo-cd"
-  namespace        = "argocd"
-  create_namespace = true
-  version          = "7.7.0"
-
-  set {
-    name  = "server.service.type"
-    value = "ClusterIP"
-  }
-}
-
-# aws-auth ConfigMap — EKS 노드 Role + GitHub Actions Role 등록
+# aws-auth ConfigMap — EKS 노드 Role 등록
 resource "kubernetes_config_map_v1_data" "aws_auth" {
   metadata {
     name      = "aws-auth"
@@ -82,14 +53,9 @@ resource "kubernetes_config_map_v1_data" "aws_auth" {
   data = {
     mapRoles = yamlencode([
       {
-        rolearn  = "arn:aws:iam::448768137813:role/seoul-eks-node-role"
+        rolearn  = "arn:aws:iam::448768137813:role/ohio-eks-node-role"
         username = "system:node:{{EC2PrivateDNSName}}"
         groups   = ["system:bootstrappers", "system:nodes"]
-      },
-      {
-        rolearn  = module.github_oidc.role_arn
-        username = "github-actions"
-        groups   = ["system:masters"]
       },
     ])
   }
@@ -115,7 +81,7 @@ resource "kubernetes_deployment_v1" "client_web" {
       spec {
         container {
           name              = "client-web-container"
-          image             = "${module.seoul_ecr["stockops-client-web"].repository_url}:latest"
+          image             = "448768137813.dkr.ecr.us-east-2.amazonaws.com/stockops-client-web:latest"
           image_pull_policy = "Always"
           port { container_port = 80 }
         }
@@ -158,7 +124,7 @@ resource "kubernetes_deployment_v1" "admin_web" {
       spec {
         container {
           name              = "admin-web-container"
-          image             = "${module.seoul_ecr["stockops-admin-web"].repository_url}:latest"
+          image             = "448768137813.dkr.ecr.us-east-2.amazonaws.com/stockops-admin-web:latest"
           image_pull_policy = "Always"
           port { container_port = 80 }
         }
@@ -201,7 +167,7 @@ resource "kubernetes_deployment_v1" "api_server" {
       spec {
         container {
           name              = "api-container"
-          image             = "${module.seoul_ecr["stockops-api"].repository_url}:latest"
+          image             = "448768137813.dkr.ecr.us-east-2.amazonaws.com/stockops-api:latest"
           image_pull_policy = "Always"
           port { container_port = 8080 }
 
@@ -211,7 +177,7 @@ resource "kubernetes_deployment_v1" "api_server" {
           }
           env {
             name  = "STOCKOPS_DATASOURCE_URL"
-            value = "jdbc:postgresql://${module.seoul_db.db_address}:5432/stockops"
+            value = "jdbc:postgresql://${aws_db_instance.ohio_replica.address}:5432/stockops"
           }
           env {
             name = "STOCKOPS_DATASOURCE_USERNAME"
@@ -308,7 +274,7 @@ resource "kubernetes_deployment_v1" "ai_module" {
       spec {
         container {
           name              = "ai-container"
-          image             = "${module.seoul_ecr["stockops-ai"].repository_url}:latest"
+          image             = "448768137813.dkr.ecr.us-east-2.amazonaws.com/stockops-ai:latest"
           image_pull_policy = "Always"
           port { container_port = 8000 }
         }
@@ -375,7 +341,6 @@ resource "kubernetes_service_v1" "redis_svc" {
 
 # --------------------------------------------------------------------------
 # TargetGroupBinding — ALB Target Group ↔ K8s Service 연결
-# targetType: ip 은 immutable, 변경 시 삭제 후 재생성 필요
 # --------------------------------------------------------------------------
 
 resource "kubectl_manifest" "client_tgb" {
@@ -386,7 +351,7 @@ resource "kubectl_manifest" "client_tgb" {
     spec = {
       targetType     = "ip"
       serviceRef     = { name = kubernetes_service_v1.client_web_svc.metadata[0].name, port = 80 }
-      targetGroupARN = module.seoul_alb.frontend_tg_arn
+      targetGroupARN = module.ohio_alb.frontend_tg_arn
     }
   })
   depends_on = [helm_release.aws_load_balancer_controller]
@@ -400,7 +365,7 @@ resource "kubectl_manifest" "admin_tgb" {
     spec = {
       targetType     = "ip"
       serviceRef     = { name = kubernetes_service_v1.admin_web_svc.metadata[0].name, port = 80 }
-      targetGroupARN = module.seoul_alb.admin_tg_arn
+      targetGroupARN = module.ohio_alb.admin_tg_arn
     }
   })
   depends_on = [helm_release.aws_load_balancer_controller]
@@ -414,7 +379,7 @@ resource "kubectl_manifest" "api_tgb" {
     spec = {
       targetType     = "ip"
       serviceRef     = { name = kubernetes_service_v1.api_server_svc.metadata[0].name, port = 8080 }
-      targetGroupARN = module.seoul_alb.spring_tg_arn
+      targetGroupARN = module.ohio_alb.spring_tg_arn
     }
   })
   depends_on = [helm_release.aws_load_balancer_controller]
@@ -428,16 +393,25 @@ resource "kubectl_manifest" "ai_tgb" {
     spec = {
       targetType     = "ip"
       serviceRef     = { name = kubernetes_service_v1.ai_module_svc.metadata[0].name, port = 8000 }
-      targetGroupARN = module.seoul_alb.fastapi_tg_arn
+      targetGroupARN = module.ohio_alb.fastapi_tg_arn
     }
   })
   depends_on = [helm_release.aws_load_balancer_controller]
 }
 
-# --------------------------------------------------------------------------
-# ESO ClusterSecretStore + ExternalSecret
-# Secrets Manager(stockops/app) → K8s Secret(stockops-secret) 자동 동기화
-# --------------------------------------------------------------------------
+# External Secrets Operator (ESO)
+resource "helm_release" "external_secrets" {
+  name             = "external-secrets"
+  repository       = "https://charts.external-secrets.io"
+  chart            = "external-secrets"
+  namespace        = "external-secrets"
+  create_namespace = true
+
+  set {
+    name  = "installCRDs"
+    value = "true"
+  }
+}
 
 resource "kubectl_manifest" "secret_store" {
   wait = true
@@ -451,7 +425,7 @@ resource "kubectl_manifest" "secret_store" {
       provider = {
         aws = {
           service = "SecretsManager"
-          region  = "ap-northeast-2"
+          region  = "us-east-2"
           auth = {
             jwt = {
               serviceAccountRef = {
@@ -495,7 +469,6 @@ resource "kubectl_manifest" "external_secret" {
   depends_on = [kubectl_manifest.secret_store]
 }
 
-# ESO ServiceAccount에 IRSA Role ARN 어노테이션 주입
 resource "kubernetes_annotations" "eso_sa" {
   api_version = "v1"
   kind        = "ServiceAccount"

@@ -1,12 +1,16 @@
-# 1. EKS 마스터 제어부용 IAM 역할 및 정책 바인딩
+# ==========================================================================
+# EKS 모듈 — 클러스터, 노드 그룹, OIDC, LBC IAM
+# ==========================================================================
+
+# EKS 컨트롤 플레인 IAM Role
 resource "aws_iam_role" "cluster_role" {
   name = "${var.region_name}-eks-cluster-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
       Principal = { Service = "eks.amazonaws.com" }
     }]
   })
@@ -17,7 +21,7 @@ resource "aws_iam_role_policy_attachment" "cluster_policy" {
   role       = aws_iam_role.cluster_role.name
 }
 
-# 2. EKS 마스터 클러스터 본체 생성
+# EKS 클러스터
 resource "aws_eks_cluster" "this" {
   name     = "${var.region_name}-cluster"
   version  = "1.30"
@@ -32,15 +36,15 @@ resource "aws_eks_cluster" "this" {
   depends_on = [aws_iam_role_policy_attachment.cluster_policy]
 }
 
-# 3. EKS 워커 노드용 IAM 역할 및 핵심 정책 바인딩
+# 워커 노드 IAM Role
 resource "aws_iam_role" "node_role" {
   name = "${var.region_name}-eks-node-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
       Principal = { Service = "ec2.amazonaws.com" }
     }]
   })
@@ -61,7 +65,7 @@ resource "aws_iam_role_policy_attachment" "node_ecr" {
   role       = aws_iam_role.node_role.name
 }
 
-# 4. 방화벽 체이닝 규칙: 기존 seoul-app-sg 로부터 들어오는 트래픽을 EKS 클러스터 내부로 전면 허용
+# app-sg → EKS 클러스터 SG 인바운드 허용
 resource "aws_security_group_rule" "eks_ingress_from_app_sg" {
   type                     = "ingress"
   from_port                = 0
@@ -71,7 +75,7 @@ resource "aws_security_group_rule" "eks_ingress_from_app_sg" {
   source_security_group_id = var.app_sg_id
 }
 
-# 5. 방화벽 체이닝 규칙: RDS DB 보안그룹에 오직 EKS 클러스터/노드 대역의 5432 접근만 동적 허용
+# EKS 클러스터 SG → RDS SG 5432 허용
 resource "aws_security_group_rule" "db_ingress_from_eks" {
   type                     = "ingress"
   from_port                = 5432
@@ -81,14 +85,13 @@ resource "aws_security_group_rule" "db_ingress_from_eks" {
   source_security_group_id = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
 }
 
-# 6. EKS 관리형 노드 그룹(Managed Node Group) 배포
+# 관리형 노드 그룹
 resource "aws_eks_node_group" "this" {
   cluster_name    = aws_eks_cluster.this.name
   node_group_name = "${var.region_name}-managed-node-group"
   node_role_arn   = aws_iam_role.node_role.arn
   subnet_ids      = var.priv_app_subnet_ids
-
-  instance_types = ["t3.medium"]
+  instance_types  = ["t3.medium"]
 
   scaling_config {
     desired_size = 2
@@ -99,11 +102,11 @@ resource "aws_eks_node_group" "this" {
   depends_on = [
     aws_iam_role_policy_attachment.node_worker,
     aws_iam_role_policy_attachment.node_cni,
-    aws_iam_role_policy_attachment.node_ecr
+    aws_iam_role_policy_attachment.node_ecr,
   ]
 }
 
-# OIDC Provider
+# OIDC Provider (IRSA용)
 data "tls_certificate" "eks" {
   url = aws_eks_cluster.this.identity[0].oidc[0].issuer
 }
@@ -114,7 +117,7 @@ resource "aws_iam_openid_connect_provider" "eks" {
   url             = aws_eks_cluster.this.identity[0].oidc[0].issuer
 }
 
-# LBC IAM Role
+# AWS Load Balancer Controller IAM Role (IRSA)
 data "aws_iam_policy_document" "lbc_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]

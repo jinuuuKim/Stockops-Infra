@@ -1,31 +1,30 @@
 # ==========================================================================
-# DB 모듈 - 입력 변수 정의 (Variables)
+# DB 모듈 — 입력 변수
 # ==========================================================================
 
 variable "region_name" {
-  description = "리전 식별자 이름 (seoul, tokyo)"
+  description = "리전 식별자 (예: seoul, ohio)"
   type        = string
 }
 
 variable "priv_db_subnet_ids" {
-  description = "RDS가 상주할 프라이빗 데이터베이스 서브넷 ID 리스트"
+  description = "RDS를 배치할 프라이빗 DB 서브넷 ID 목록"
   type        = list(string)
 }
 
 variable "db_sg_id" {
-  description = "seoul/security_groups.tf 에서 정의한 DB 전용 보안 그룹 ID"
+  description = "RDS에 적용할 DB 전용 보안 그룹 ID"
   type        = string
 }
 
-# --- DB 마스터 계정 설정 (개발 편의상 변수 기본값 부여, 실무선 외부 주입 권장) ---
 variable "db_username" {
   description = "PostgreSQL 마스터 사용자 이름"
   type        = string
-  default     = "dbadmin"
+  sensitive   = true
 }
 
 variable "db_password" {
   description = "PostgreSQL 마스터 비밀번호"
   type        = string
-  default     = "StockOpsPass123!" # 대소문자 및 특수문자 조합 필수
+  sensitive   = true
 }

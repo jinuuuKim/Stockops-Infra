@@ -1,11 +1,11 @@
 # ==========================================================================
-# 서울 리전 — 프로바이더 및 백엔드 설정
+# 오하이오 리전 — 프로바이더 및 백엔드 설정
 # ==========================================================================
 
 terraform {
   backend "s3" {
     bucket  = "siseon-terraform-state"
-    key     = "infra/seoul/terraform.tfstate"
+    key     = "infra/ohio/terraform.tfstate"
     region  = "ap-northeast-2"
     profile = "siseon"
   }
@@ -31,42 +31,42 @@ terraform {
 }
 
 provider "aws" {
-  region  = "ap-northeast-2"
+  region  = "us-east-2"
   profile = "siseon"
 }
 
 provider "kubernetes" {
-  host                   = module.seoul_eks.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.seoul_eks.cluster_ca_certificate)
+  host                   = module.ohio_eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.ohio_eks.cluster_ca_certificate)
 
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", "seoul-cluster", "--profile", "siseon"]
+    args        = ["eks", "get-token", "--cluster-name", "ohio-cluster", "--profile", "siseon"]
   }
 }
 
 provider "helm" {
   kubernetes {
-    host                   = module.seoul_eks.cluster_endpoint
-    cluster_ca_certificate = base64decode(module.seoul_eks.cluster_ca_certificate)
+    host                   = module.ohio_eks.cluster_endpoint
+    cluster_ca_certificate = base64decode(module.ohio_eks.cluster_ca_certificate)
 
     exec {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", "seoul-cluster", "--profile", "siseon"]
+      args        = ["eks", "get-token", "--cluster-name", "ohio-cluster", "--profile", "siseon"]
     }
   }
 }
 
 provider "kubectl" {
-  host                   = module.seoul_eks.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.seoul_eks.cluster_ca_certificate)
+  host                   = module.ohio_eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.ohio_eks.cluster_ca_certificate)
   load_config_file       = false
 
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", "seoul-cluster", "--profile", "siseon"]
+    args        = ["eks", "get-token", "--cluster-name", "ohio-cluster", "--profile", "siseon"]
   }
 }

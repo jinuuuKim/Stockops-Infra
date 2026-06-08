@@ -1,6 +1,5 @@
 # ==========================================================================
-# 서울 리전 — Secrets Manager + ESO IRSA
-# 흐름: Secrets Manager → ESO → K8s Secret (stockops-secret) 자동 생성
+# 오하이오 리전 — Secrets Manager + ESO IRSA
 # ==========================================================================
 
 resource "aws_secretsmanager_secret" "stockops" {
@@ -17,34 +16,33 @@ resource "aws_secretsmanager_secret_version" "stockops" {
   })
 }
 
-# ESO가 Secrets Manager를 읽을 수 있도록 IRSA Trust Policy 정의
 data "aws_iam_policy_document" "eso_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     principals {
       type        = "Federated"
-      identifiers = [module.seoul_eks.oidc_provider_arn]
+      identifiers = [module.ohio_eks.oidc_provider_arn]
     }
     condition {
       test     = "StringEquals"
-      variable = "${module.seoul_eks.oidc_provider}:sub"
+      variable = "${module.ohio_eks.oidc_provider}:sub"
       values   = ["system:serviceaccount:external-secrets:external-secrets"]
     }
     condition {
       test     = "StringEquals"
-      variable = "${module.seoul_eks.oidc_provider}:aud"
+      variable = "${module.ohio_eks.oidc_provider}:aud"
       values   = ["sts.amazonaws.com"]
     }
   }
 }
 
 resource "aws_iam_role" "eso" {
-  name               = "stockops-eso-role"
+  name               = "ohio-eso-role"
   assume_role_policy = data.aws_iam_policy_document.eso_assume.json
 }
 
 resource "aws_iam_role_policy" "eso" {
-  name = "stockops-eso-policy"
+  name = "ohio-eso-policy"
   role = aws_iam_role.eso.id
   policy = jsonencode({
     Version = "2012-10-17"

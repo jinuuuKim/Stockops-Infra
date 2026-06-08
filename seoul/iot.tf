@@ -1,5 +1,6 @@
 # ==========================================================================
-# seoul/iot.tf
+# 서울 리전 — IoT Core 파이프라인
+# 흐름: 온프레미스 센서 → Mosquitto 브리지 → IoT Core → SQS → 백엔드
 # ==========================================================================
 
 module "seoul_iot" {
@@ -9,8 +10,4 @@ module "seoul_iot" {
   topic_prefix   = "sensimul/sites"
   sqs_queue_name = "stockops-sensor-data"
   sqs_dlq_name   = "stockops-sensor-data-dlq"
-}
-
-output "sensor_sqs_queue_url" {
-  value = module.seoul_iot.sqs_queue_url
 }

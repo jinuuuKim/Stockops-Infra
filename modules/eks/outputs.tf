@@ -1,40 +1,48 @@
+# ==========================================================================
+# EKS 모듈 — 출력 변수
+# ==========================================================================
+
 output "cluster_name" {
+  description = "EKS 클러스터 이름"
   value       = aws_eks_cluster.this.name
-  description = "EKS 클러스터 고유 식별 명칭"
 }
 
 output "cluster_endpoint" {
+  description = "EKS API 서버 엔드포인트"
   value       = aws_eks_cluster.this.endpoint
-  description = "쿠버네티스 컨트롤 플레인 API 서버 접속 주소"
 }
 
 output "cluster_ca_certificate" {
+  description = "EKS 클러스터 CA 인증서 (base64)"
   value       = aws_eks_cluster.this.certificate_authority[0].data
-  description = "보안 인증을 위한 CA 공개키 데이터"
-}
-
-output "oidc_issuer" {
-  value       = aws_eks_cluster.this.identity[0].oidc[0].issuer
-  description = "쿠버네티스 서비스 어카운트 IAM 자격 증명 연동을 위한 OIDC 주소"
-}
-
-output "oidc_provider_arn" {
-  value = aws_iam_openid_connect_provider.eks.arn
-}
-
-output "oidc_provider" {
-  value = replace(aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")
 }
 
 output "cluster_security_group_id" {
-  description = "EKS 클러스터가 자동 생성하여 노드들에 채워준 진짜 보안 그룹 ID"
+  description = "EKS 클러스터 자동 생성 보안 그룹 ID"
   value       = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
 }
 
+output "oidc_issuer" {
+  description = "OIDC Issuer URL"
+  value       = aws_eks_cluster.this.identity[0].oidc[0].issuer
+}
+
+output "oidc_provider_arn" {
+  description = "OIDC Provider ARN (IRSA 신뢰 정책 참조용)"
+  value       = aws_iam_openid_connect_provider.eks.arn
+}
+
+output "oidc_provider" {
+  description = "OIDC Provider URL (https:// 제거, IRSA condition 변수용)"
+  value       = replace(aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")
+}
+
 output "lbc_role_arn" {
-  value = aws_iam_role.lbc.arn
+  description = "AWS Load Balancer Controller IAM Role ARN"
+  value       = aws_iam_role.lbc.arn
 }
 
 output "lbc_role_policy_attachment" {
-  value = aws_iam_role_policy_attachment.lbc.id
+  description = "LBC IAM Role 정책 연결 ID"
+  value       = aws_iam_role_policy_attachment.lbc.id
 }

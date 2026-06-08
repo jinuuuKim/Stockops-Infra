@@ -1,12 +1,12 @@
-# ─────────────────────────────────────────────
-# seoul/iam.tf
-# ─────────────────────────────────────────────
+# ==========================================================================
+# 서울 리전 — IAM (GitHub Actions OIDC)
+# ==========================================================================
 
 module "github_oidc" {
   source = "../modules/github-oidc"
 
-  github_org      = "jinuuuKim"
-  github_repo     = "Stockops-Application"
+  github_org       = "jinuuuKim"
+  github_repo      = "Stockops-Application"
   allowed_branches = ["main"]
 
   ecr_arns = [
