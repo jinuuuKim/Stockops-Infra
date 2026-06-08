@@ -57,6 +57,28 @@ resource "helm_release" "aws_load_balancer_controller" {
   depends_on = [module.seoul_eks]
 }
 
+resource "kubernetes_config_map_v1_data" "aws_auth" {
+  metadata {
+    name      = "aws-auth"
+    namespace = "kube-system"
+  }
+  data = {
+    mapRoles = yamlencode([
+      {
+        rolearn  = "arn:aws:iam::448768137813:role/seoul-eks-node-role"
+        username = "system:node:{{EC2PrivateDNSName}}"
+        groups   = ["system:bootstrappers", "system:nodes"]
+      },
+      {
+        rolearn  = module.github_oidc.role_arn
+        username = "github-actions"
+        groups   = ["system:masters"]
+      }
+    ])
+  }
+  force = true
+}
+
 # --------------------------------------------------------------------------
 # [컴포넌트 1] stockops-client-web (사용자 포털 - Port 80)
 # --------------------------------------------------------------------------
@@ -389,4 +411,77 @@ resource "kubectl_manifest" "ai_tgb" {
     }
   })
   depends_on = [helm_release.aws_load_balancer_controller]
+}
+
+# ==========================================================================
+# ESO SecretStore + ExternalSecret
+# ==========================================================================
+
+resource "kubectl_manifest" "secret_store" {
+  wait = true
+  yaml_body = yamlencode({
+    apiVersion = "external-secrets.io/v1"
+    kind       = "ClusterSecretStore"
+    metadata = {
+      name = "stockops-secret-store"
+    }
+    spec = {
+      provider = {
+        aws = {
+          service = "SecretsManager"
+          region  = "ap-northeast-2"
+          auth = {
+            jwt = {
+              serviceAccountRef = {
+                name      = "external-secrets"
+                namespace = "external-secrets"
+              }
+            }
+          }
+        }
+      }
+    }
+  })
+  depends_on = [helm_release.external_secrets]
+}
+
+resource "kubectl_manifest" "external_secret" {
+  yaml_body = yamlencode({
+    apiVersion = "external-secrets.io/v1"
+    kind       = "ExternalSecret"
+    metadata = {
+      name      = "stockops-external-secret"
+      namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+    }
+    spec = {
+      refreshInterval = "1h"
+      secretStoreRef = {
+        name = "stockops-secret-store"
+        kind = "ClusterSecretStore"
+      }
+      target = {
+        name           = "stockops-secret"
+        creationPolicy = "Owner"
+      }
+      dataFrom = [{
+        extract = {
+          key = "stockops/app"
+        }
+      }]
+    }
+  })
+  depends_on = [kubectl_manifest.secret_store]
+}
+
+resource "kubernetes_annotations" "eso_sa" {
+  api_version = "v1"
+  kind        = "ServiceAccount"
+  metadata {
+    name      = "external-secrets"
+    namespace = "external-secrets"
+  }
+  annotations = {
+    "eks.amazonaws.com/role-arn" = aws_iam_role.eso.arn
+  }
+  depends_on = [helm_release.external_secrets]
 }

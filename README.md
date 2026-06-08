@@ -23,8 +23,8 @@ StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS
 - **온프레미스(한국)**: 센터/창고. 온도 센서 데이터 수집
 - **Azure 서울**: 백업 데이터 + 상시 로그 저장 (재해 복구용)
 
-**데이터**: AWS RDS Multi-AZ / 서울(Master) ↔ 오하이오(Slave) 동기화, 미국은 읽기 전용 / Azure에 백업·로그
-**트래픽**: Global Accelerator 지연 기반 라우팅 (한국→서울, 미국→오하이오), 리전 장애 시 페일오버
+**데이터**: AWS RDS Multi-AZ / 서울(Master) ↔ 오하이오(Slave) 동기화, 미국은 읽기 전용 / Azure에 백업·로그  
+**트래픽**: Global Accelerator 지연 기반 라우팅 (한국→서울, 미국→오하이오), 리전 장애 시 페일오버  
 **보안**: 미국 영업팀은 최소 권한으로 앱/DB 접근 (본사 영향 차단)
 
 ---
@@ -47,44 +47,120 @@ StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS
 
 ---
 
+## 인프라 구성 현황
+
+### 모듈 구조
+
+```
+modules/
+├── vpc/            # VPC + 3-tier 서브넷 (public / private-app / private-db)
+├── eks/            # EKS 클러스터 (seoul-cluster v1.30, t3.medium×2) + OIDC Provider
+├── alb/            # ALB + 경로 기반 Target Group (/, /admin, /api, /ai)
+├── db/             # RDS PostgreSQL 16 (Multi-AZ)
+├── ecr/            # ECR 리포 × 4 (api, ai, admin-web, client-web)
+├── github-oidc/    # GitHub Actions OIDC Provider + IAM Role
+└── iot/            # IoT Thing + 인증서 + 정책 + Rule + SQS + DLQ
+```
+
+### 배포된 AWS 리소스
+
+| 리소스 | 상세 |
+|--------|------|
+| VPC | 10.0.0.0/16, 서울 2-AZ (2a/2c) |
+| EKS | seoul-cluster v1.30, t3.medium×2 |
+| ALB | 경로 기반 라우팅 (/, /admin, /api, /ai) |
+| RDS | PostgreSQL 16, db.t3.micro, stockops DB |
+| ECR | 4개 리포 (api / ai / admin-web / client-web) |
+| IoT Core | Thing + 인증서 + SQS Rule |
+| SQS | stockops-sensor-data / stockops-sensor-data-dlq |
+| Secrets Manager | stockops/app (JWT, DB 자격증명) |
+| S3 | siseon-terraform-state (Terraform state 백엔드) |
+
+### CI/CD
+
+```
+GitHub Actions (CI)
+    └─ 코드 push → 이미지 빌드 → ECR push
+         └─ OIDC 인증 (액세스 키 없음, role-to-assume 방식)
+
+ArgoCD (CD) — 예정
+    └─ GitOps 방식 배포
+```
+
+### 시크릿 관리 (ESO)
+
+```
+Secrets Manager (stockops/app)
+    └─ ESO Controller (ClusterSecretStore)
+         └─ ExternalSecret (1h 주기 동기화)
+              └─ K8s Secret (stockops-secret) 자동 생성
+                   └─ 파드 환경변수 주입
+```
+
+> ESO IRSA로 Secrets Manager 접근 권한 부여. `terraform.tfvars`에 실제 값 관리, Git 비추적.
+
+### IoT 센서 파이프라인
+
+```
+온프레미스 센서 (sensormqtt.ithans.com)
+    └─ Mosquitto 브리지 (TLS:8883) — 설정 대기 중
+         └─ AWS IoT Core
+              └─ IoT Rule (sensimul/sites/+/sensors/+)
+                   └─ SQS (stockops-sensor-data)
+```
+
+현장 ID: `TEST_INDOOR_01` / 센서 7종: TEMP, HUM, PM25, PM10, PRESSURE, DOOR, PRESENCE
+
+---
+
 ## 배포 방법
 
 ### 사전 준비
-- AWS CLI 자격증명 설정
+
+- AWS CLI 자격증명 설정 (`aws sso login --profile siseon`)
 - kubectl, terraform 설치
-- `terraform.tfvars`에 `db_username`, `db_password`, `jwt_secret` 등 설정
+- `seoul/terraform.tfvars` 생성:
+
+```hcl
+jwt_secret  = "<랜덤 32자 이상>"
+db_username = "<DB 유저>"
+db_password = "<DB 비밀번호>"
+```
 
 ### 1. 인프라 배포
 
 ```powershell
 cd seoul
 
-# 최초 구축 시: EKS 클러스터가 없으면 provider 연결 문제로
-# kubernetes_manifest/kubectl_manifest가 plan에서 실패할 수 있음.
-# 그 경우 인프라 먼저 → kubeconfig → 전체 순으로 분리 실행.
-
 # (A) 클러스터가 이미 있는 경우 — 한 방에
 terraform apply -auto-approve
 
 # (B) 완전 처음(클러스터 없음) — 단계 분리
 terraform apply --% -auto-approve -target=module.seoul_vpc -target=module.seoul_alb -target=module.seoul_eks -target=module.seoul_db -target=module.seoul_ecr
-aws eks update-kubeconfig --region ap-northeast-2 --name seoul-cluster
+aws eks update-kubeconfig --region ap-northeast-2 --name seoul-cluster --profile siseon
 terraform apply -auto-approve
 ```
 
 > `wait_for_rollout = false` 설정으로 deployment는 이미지가 없어도 apply가 멈추지 않는다.
 
-### 2. Kubernetes Secret 생성
+### 2. kubeconfig 업데이트
 
 ```powershell
-kubectl create secret generic stockops-secret `
-  --from-literal=JWT_SECRET="<랜덤32자이상>" `
-  --from-literal=DB_USERNAME="<DB유저>" `
-  --from-literal=DB_PASSWORD="<DB비번>" `
-  -n stockops
+aws eks update-kubeconfig --name seoul-cluster --region ap-northeast-2 --profile siseon
 ```
 
-### 3. 애플리케이션 이미지 배포 (GitHub Actions)
+### 3. K8s Secret 확인
+
+ESO가 자동으로 `stockops-secret`을 생성한다. 정상 동작 여부 확인:
+
+```powershell
+kubectl get externalsecret -n stockops
+kubectl get secret stockops-secret -n stockops
+```
+
+> `STATUS: SecretSynced` 확인. 이전처럼 `kubectl create secret` 수동 생성 불필요.
+
+### 4. 애플리케이션 이미지 배포 (GitHub Actions)
 
 ECR 리포가 생성된 뒤, Stockops-Application의 GitHub Actions로 이미지를 빌드/푸시한다.
 
@@ -95,7 +171,7 @@ gh workflow run deploy.yml
 
 이미지가 ECR에 올라오면 ImagePullBackOff 상태였던 Pod가 자동으로 다시 pull → Running.
 
-### 4. 검증
+### 5. 검증
 
 ```powershell
 kubectl get pods -n stockops
@@ -104,14 +180,16 @@ kubectl get targetgroupbinding -n stockops
 kubectl exec -it <api-pod> -n stockops -- curl -s localhost:8080/actuator/health
 ```
 
-ALB DNS로 접속:
+ALB DNS 확인:
+
 ```powershell
 aws elbv2 describe-load-balancers --names seoul-alb --query "LoadBalancers[0].DNSName" --output text
 ```
 
-### 5. 초기 로그인 계정
+### 6. 초기 로그인 계정
 
 앱 기동 시 `AuthDataLoader`가 admin 계정을 자동 시드한다.
+
 - 이메일: `admin@stockops.com`
 - 비밀번호: `admin123`
 
@@ -144,17 +222,24 @@ aws rds describe-db-instances --query "DBInstances[*].DBInstanceIdentifier" --ou
 aws elbv2 describe-load-balancers --query "LoadBalancers[*].LoadBalancerName" --output table
 ```
 
-남을 수 있는 IAM: `seoul-eks-cluster-role`, `seoul-eks-node-role`, `seoul-lbc-role`, 커스텀 정책 `seoul-lbc-policy`. 정책을 detach 후 role 삭제.
+남을 수 있는 IAM: `seoul-eks-cluster-role`, `seoul-eks-node-role`, `seoul-lbc-role`, `stockops-eso-role`, `github-actions-ecr-push`, 커스텀 정책 `seoul-lbc-policy`. 정책을 detach 후 role 삭제.
+
+> **주의**: destroy 후 재apply 시 IoT 인증서가 새로 발급된다. 온프레미스 브리지 설정에 사용한 인증서가 무효화되므로 재추출 후 재전달 필요.
 
 ---
 
-## 추가 예정 (로드맵)
+## 로드맵
 
-- **호스트 분리**: Route 53 + ACM으로 `admin.도메인` / `client.도메인` 분리 → 서브패스 쿠키 문제 근본 해결
-- **멀티 리전**: 오하이오 리전 확장 + ECR replication
-- **Secrets Manager**: ESO(설치됨) 연동으로 DB/JWT 시크릿 자동 동기화, RDS `manage_master_user_password`
-- **온프레미스 연동**: Site-to-Site VPN
-- **센서 파이프라인**: IoT Core → SQS → 백엔드 분석
-- **기타**: S3, Global Accelerator, Observability 스택
+- [x] VPC + EKS + ALB + RDS + ECR 배포
+- [x] GitHub Actions OIDC 전환 (액세스 키 제거)
+- [x] IoT Core + SQS 파이프라인 구축
+- [x] S3 Terraform backend + state 중앙화
+- [x] Secrets Manager + ESO 연동 (시크릿 자동화)
+- [ ] Route 53 + ACM — 도메인 연결 + admin 서브패스 쿠키 문제 해결
+- [ ] ArgoCD — GitOps CD 구성
+- [ ] IoT 브리지 연결 확인 (온프레미스 Mosquitto → IoT Core)
+- [ ] 멀티 리전 (오하이오) + ECR replication
+- [ ] Global Accelerator
+- [ ] Observability 스택
 
 자세한 아키텍처는 `ARCHITECTURE.md`, AWS 리소스 목록은 `AWS_RESOURCES.md` 참고.

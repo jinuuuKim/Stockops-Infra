@@ -47,20 +47,26 @@ StockOps는 AX(AI Transformation) 환경의 ERP 솔루션으로, 멀티 리전·
 
 ## 5. 온프레미스 연동 (센서 데이터 파이프라인)
 
-서울 센터 및 온프레미스 창고에서 **온도 값 데이터**를 수집하여 AWS로 전송한다. 전송된 데이터는 백엔드로 전달되어 데이터 분석 처리에 사용된다.
+서울 센터 및 온프레미스 창고에서 센서 데이터를 수집하여 AWS로 전송한다. 전송된 데이터는 SQS를 통해 백엔드로 전달되어 AI 모듈 분석에 사용된다.
 
 ```
-[온프레미스 창고 센서]
-        │ (온도 데이터)
+[온프레미스 창고 센서 — sensormqtt.ithans.com]
+        │ Mosquitto 브리지 (TLS:8883) ← 설정 대기 중
         ▼
-   [AWS IoT Core]  ← Site-to-Site VPN / 수신 엔드포인트
+   [AWS IoT Core]
+   Topic: sensimul/sites/+/sensors/+
+        │ IoT Rule
+        ▼
+   [SQS: stockops-sensor-data]
+   [DLQ: stockops-sensor-data-dlq]
         │
         ▼
-   [SQS / 백엔드]
-        │
-        ▼
-   [데이터 분석 처리 — AI 모듈]
+   [백엔드 / AI 모듈 — 데이터 분석]
 ```
+
+현장 ID: `TEST_INDOOR_01` / 센서 7종: TEMP, HUM, PM25, PM10, PRESSURE, DOOR, PRESENCE
+
+> Site-to-Site VPN 없이 Mosquitto 브리지 → IoT Core 직접 TLS 연결 방식으로 결정.
 
 ---
 
@@ -74,10 +80,19 @@ https://github.com/jinuuuKim/Stockops-Application
 | `stockops-api-server` | 메인 백엔드 (Spring Boot 3.2.12, Java 21) | 8080 |
 | `stockops-ai-module` | AI 수요 예측 서비스 (FastAPI) | 8000 |
 
-- CI/CD: GitHub Actions (`.github/workflows/deploy.yml`)
-  - `main` 브랜치 push 트리거 (+ `workflow_dispatch` 수동 실행 권장)
-  - Build → ECR Push → EKS Rollout Restart
-  - **인프라(Terraform)와는 별개 트랙.** Terraform이 ECR 리포(그릇)를 만들고, GitHub Actions가 이미지(내용물)를 채운다. `depends_on`으로 묶을 수 없음.
+### CI/CD
+
+```
+GitHub Actions (CI)
+    └─ main 브랜치 push / workflow_dispatch
+         └─ Build → ECR Push (OIDC 인증, 액세스 키 없음)
+
+ArgoCD (CD) — 예정
+    └─ GitOps 방식 배포
+```
+
+- **OIDC 인증**: `role-to-assume` 방식으로 전환 완료. 액세스 키 없음.
+- Terraform이 ECR 리포(그릇)를 만들고, GitHub Actions가 이미지(내용물)를 채운다. `depends_on`으로 묶을 수 없음.
 
 ### 주요 애플리케이션 설정 노트
 - Spring 프로파일: `local`(H2 인메모리), `dev`(PostgreSQL), `prod`(PostgreSQL). 현재 운영은 `dev` + RDS.
@@ -96,18 +111,37 @@ https://github.com/jinuuuKim/Stockops-Application
 ```
 Stockops-Infra/
 ├── modules/
-│   ├── alb/        # Application Load Balancer + Target Groups
-│   ├── db/         # RDS PostgreSQL (Multi-AZ)
-│   ├── ecr/        # ECR 리포지토리 (4개, for_each)
-│   ├── eks/        # EKS + 노드그룹 + IRSA(LBC) + lbc-iam-policy.json
-│   └── vpc/        # VPC + 3-Tier Subnets
-├── seoul/          # 서울 리전 배포 (서울 단독 동작 검증 완료)
-│   ├── kubernetes.tf   # NS, ESO, LBC, deploy×5, svc×5, TGB×4(kubectl_manifest)
-│   ├── main.tf
-│   ├── provider.tf     # aws, kubernetes(2.38), helm, kubectl(gavinbunney)
-│   ├── security_groups.tf
-│   └── outputs.tf
-└── (ohio/)         # 오하이오 리전 — 추후 확장 예정
+│   ├── alb/          # Application Load Balancer + Target Groups
+│   ├── db/           # RDS PostgreSQL (Multi-AZ)
+│   ├── ecr/          # ECR 리포지토리 (4개, for_each)
+│   ├── eks/          # EKS + 노드그룹 + IRSA(LBC) + lbc-iam-policy.json
+│   ├── github-oidc/  # GitHub Actions OIDC Provider + IAM Role
+│   ├── iot/          # IoT Thing + 인증서 + 정책 + Rule + SQS + DLQ
+│   └── vpc/          # VPC + 3-Tier Subnets
+└── seoul/
+    ├── main.tf
+    ├── iam.tf            # github-oidc 모듈 호출, ESO IRSA
+    ├── iot.tf            # IoT 모듈 호출
+    ├── secrets.tf        # Secrets Manager + ESO IRSA
+    ├── kubernetes.tf     # NS, ESO, LBC, deploy×5, svc×5, TGB×4, ESO 매니페스트
+    ├── provider.tf       # aws, kubernetes(2.38), helm, kubectl(gavinbunney)
+    ├── security_groups.tf
+    ├── outputs.tf
+    ├── variables.tf      # 민감값 변수 선언
+    └── terraform.tfvars  # 실제 값 (Git 비추적)
+```
+
+### Terraform State 관리
+
+S3 backend로 중앙화 완료.
+
+```hcl
+backend "s3" {
+  bucket  = "siseon-terraform-state"
+  key     = "infra/terraform.tfstate"
+  region  = "ap-northeast-2"
+  profile = "siseon"
+}
 ```
 
 ### 네트워크
@@ -134,47 +168,45 @@ Stockops-Infra/
 | `/api`, `/api/*` | Spring API (spring-tg) |
 | `/ai`, `/ai/*` | FastAPI (fastapi-tg) |
 
-> ⚠️ **경로 기반 라우팅의 한계**: admin을 `/admin` 서브패스로 배포하면 React `basename`, vite `base`, 쿠키 `path` 등을 모두 맞춰야 하고, 특히 refresh 토큰 쿠키 경로 문제로 새로고침 시 로그아웃되는 이슈가 있다. **→ Route 53 + ACM 단계에서 호스트 기반(`admin.도메인` / `client.도메인`)으로 전환 예정.** 호스트 분리 시 각 앱이 루트(`/`)에서 동작하여 서브패스 관련 문제가 모두 사라진다.
+> ⚠️ **경로 기반 라우팅의 한계**: admin을 `/admin` 서브패스로 배포하면 React `basename`, vite `base`, 쿠키 `path` 등을 모두 맞춰야 하고, 특히 refresh 토큰 쿠키 경로 문제로 새로고침 시 로그아웃되는 이슈가 있다. **→ Route 53 + ACM 단계에서 호스트 기반(`admin.도메인` / `client.도메인`)으로 전환 예정.**
+
+### 시크릿 관리 (ESO)
+
+```
+Secrets Manager (stockops/app)
+    └─ ClusterSecretStore (stockops-secret-store)
+         └─ ExternalSecret (1h 주기 동기화)
+              └─ K8s Secret (stockops-secret) 자동 생성
+                   └─ 파드 환경변수 주입 (JWT_SECRET, DB_USERNAME, DB_PASSWORD)
+```
+
+- ESO IRSA(`stockops-eso-role`)로 Secrets Manager 접근 권한 부여
+- `terraform.tfvars`에서 실제 값 관리, `.gitignore`로 Git 비추적
+- destroy/재apply 후 `stockops-secret` 수동 생성 불필요 (ESO 자동 복구)
 
 ---
 
-## 8. 추가 예정 서비스
-
-| 서비스 | 용도 |
-|--------|------|
-| **Site-to-Site VPN** | 온프레미스 ↔ AWS 연결 |
-| **IoT Core** | 온프레미스 센서 데이터 수신 |
-| **SQS** | 센서 데이터 비동기 큐잉 |
-| **S3** | 데이터/로그 저장 |
-| **Global Accelerator** | 리전 간 지연 기반 트래픽 라우팅 |
-| **Secrets Manager** | 시크릿 중앙 관리 (현재 ESO 설치됨, 마이그레이션 예정) |
-| **AWS Certificate Manager (ACM)** | TLS 인증서 |
-| **Route 53** | DNS + 페일오버 라우팅 + **admin/client 호스트 분리** |
-| **호스트 분리 (우선순위 ↑)** | ALB를 경로 기반 → 호스트 기반으로 전환. `admin.도메인` / `client.도메인`. admin 서브패스 쿠키 문제 근본 해결 |
-
----
-
-## 9. 배포 시 주의사항 (실전 메모)
+## 8. 배포 시 주의사항 (실전 메모)
 
 ### 배포 순서
-- `kubectl_manifest`(TGB)는 `depends_on=LBC`로 순서가 보장되고, deployment는 `wait_for_rollout=false`라 **이미지 없이도 apply가 한 번에 끝난다.**
-- 단, **EKS 클러스터가 아예 없는 최초 구축**에서는 provider가 plan 시점에 클러스터에 연결하려다 실패할 수 있어, 그 경우만 단계 분리 필요:
+- 클러스터가 이미 있으면 `terraform apply -auto-approve` 한 방.
+- **EKS 클러스터가 아예 없는 최초 구축**에서는 단계 분리 필요:
   ```powershell
-  # 최초 1회: 인프라 먼저
   terraform apply --% -auto-approve -target=module.seoul_vpc -target=module.seoul_alb -target=module.seoul_eks -target=module.seoul_db -target=module.seoul_ecr
-  aws eks update-kubeconfig --region ap-northeast-2 --name seoul-cluster
+  aws eks update-kubeconfig --region ap-northeast-2 --name seoul-cluster --profile siseon
   terraform apply -auto-approve
   ```
-- 클러스터가 이미 있으면 `terraform apply -auto-approve` 한 방.
 - 이미지는 별도로 GitHub Actions로 채운다 (ECR 생성 후 언제든).
 
 ### 함정 모음
-- nginx 프론트엔드 upstream은 K8s Service 이름(`stockops-api-svc:8080`) 사용. nginx conf는 앱 이미지에 포함되므로 수정 시 재빌드 필요.
-- React 서브패스(`/admin`) 배포 시 vite `base: '/admin/'` + React Router `basename="/admin"` + nginx `alias` 모두 필요. (호스트 분리하면 불필요)
+- nginx 프론트엔드 upstream은 K8s Service 이름(`stockops-api-svc:8080`) 사용.
+- React 서브패스(`/admin`) 배포 시 vite `base: '/admin/'` + React Router `basename="/admin"` + nginx `alias` 모두 필요.
 - TargetGroupBinding의 `targetType`은 immutable — 변경 시 삭제 후 재생성.
-- ALB 헬스체크 경로: Spring은 `/actuator/health`(인증 불필요 경로), FastAPI는 `/health`. `/api`는 Security가 막아서 401.
+- ALB 헬스체크 경로: Spring은 `/actuator/health`, FastAPI는 `/health`.
 - `kubernetes` provider는 2.38 고정 권장 (deployment identity 버그 회피).
 - PowerShell 멀티 인자 전달 시 `--%` 연산자 사용.
+- 인증서 파일 추출 시 PowerShell 리다이렉션 BOM 주의 → Python `open().write()` 사용.
+- destroy 후 재apply 시 IoT 인증서 새로 발급됨 → 온프레미스 브리지 재설정 필요.
 
 ### destroy
 ```powershell
@@ -182,9 +214,23 @@ Stockops-Infra/
 terraform destroy --% -auto-approve -target=kubectl_manifest.client_tgb -target=kubectl_manifest.admin_tgb -target=kubectl_manifest.api_tgb -target=kubectl_manifest.ai_tgb
 terraform destroy -auto-approve
 ```
-- destroy 후 IAM Role(`seoul-eks-cluster-role`, `seoul-eks-node-role`, `seoul-lbc-role`)과 NAT GW/RDS/ALB 잔재 확인 필수.
-- kubectl로 만든 `stockops-secret`은 클러스터와 함께 삭제됨 → 재구축 시 재생성.
+- destroy 후 IAM Role(`seoul-eks-cluster-role`, `seoul-eks-node-role`, `seoul-lbc-role`, `stockops-eso-role`, `github-actions-ecr-push`) 잔재 확인 필수.
+- ESO가 `stockops-secret`을 자동 복구하므로 수동 재생성 불필요.
 
 ---
 
-*문서 작성일: 2026-06-05 / 서울 단독 배포 검증 완료, 방법 A(kubectl_manifest) + wait_for_rollout 적용, admin 호스트 분리 방향 결정 반영*
+## 9. 추가 예정 서비스
+
+| 서비스 | 용도 |
+|--------|------|
+| **Route 53 + ACM** | DNS + TLS + admin/client 호스트 분리 (쿠키 문제 해결) |
+| **ArgoCD** | GitOps CD 구성 |
+| **IoT 브리지 연결** | 온프레미스 Mosquitto → IoT Core 연결 확인 |
+| **Global Accelerator** | 리전 간 지연 기반 트래픽 라우팅 |
+| **오하이오 리전** | 멀티 리전 확장 + ECR replication |
+| **Azure 서울** | 백업/로그 저장 (하이브리드) |
+| **Observability** | 모니터링 스택 |
+
+---
+
+*최종 업데이트: 2026-06-08 / GitHub Actions OIDC 전환, IoT 파이프라인, S3 backend, Secrets Manager + ESO 연동 완료*

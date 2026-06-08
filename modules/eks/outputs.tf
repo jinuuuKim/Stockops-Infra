@@ -18,6 +18,14 @@ output "oidc_issuer" {
   description = "쿠버네티스 서비스 어카운트 IAM 자격 증명 연동을 위한 OIDC 주소"
 }
 
+output "oidc_provider_arn" {
+  value = aws_iam_openid_connect_provider.eks.arn
+}
+
+output "oidc_provider" {
+  value = replace(aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")
+}
+
 output "cluster_security_group_id" {
   description = "EKS 클러스터가 자동 생성하여 노드들에 채워준 진짜 보안 그룹 ID"
   value       = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id

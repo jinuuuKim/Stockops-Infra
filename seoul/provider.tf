@@ -1,6 +1,13 @@
 # seoul/provider.tf 파일 전체 교체 코드 (진짜 이름 seoul-cluster 적용 버전)
 
 terraform {
+  backend "s3" {
+    bucket  = "siseon-terraform-state"
+    key     = "infra/terraform.tfstate"
+    region  = "ap-northeast-2"
+    profile = "siseon"
+  }
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
