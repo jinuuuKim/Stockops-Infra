@@ -17,10 +17,11 @@ module "ohio_vpc" {
 }
 
 module "ohio_alb" {
-  source            = "../modules/alb"
-  region_name       = "ohio"
-  vpc_id            = module.ohio_vpc.vpc_id
-  public_subnet_ids = module.ohio_vpc.public_subnet_ids
+  source              = "../modules/alb"
+  region_name         = "ohio"
+  vpc_id              = module.ohio_vpc.vpc_id
+  public_subnet_ids   = module.ohio_vpc.public_subnet_ids
+  acm_certificate_arn = aws_acm_certificate_validation.ohio.certificate_arn
 }
 
 module "ohio_eks" {

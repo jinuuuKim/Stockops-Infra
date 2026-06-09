@@ -135,11 +135,29 @@ resource "aws_lb_target_group" "fastapi_tg" {
   }
 }
 
-# HTTP 리스너 (기본 → client-web)
+# HTTP 리스너 → HTTPS 리다이렉트
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.alb.arn
   port              = "80"
   protocol          = "HTTP"
+
+  default_action {
+    type = "redirect"
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+}
+
+# HTTPS 리스너 (기본 → client-web)
+resource "aws_lb_listener" "https" {
+  load_balancer_arn = aws_lb.alb.arn
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = var.acm_certificate_arn
 
   default_action {
     type             = "forward"
@@ -147,9 +165,9 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-# 경로 기반 라우팅 규칙
+# admin-web — 호스트 기반 라우팅
 resource "aws_lb_listener_rule" "admin_rule" {
-  listener_arn = aws_lb_listener.http.arn
+  listener_arn = aws_lb_listener.https.arn
   priority     = 85
 
   action {
@@ -158,15 +176,16 @@ resource "aws_lb_listener_rule" "admin_rule" {
   }
 
   condition {
-    path_pattern {
-      values = ["/admin", "/admin/*"]
+    host_header {
+      values = ["admin.mellohn.cloud"]
     }
   }
 }
 
+# api-server — 경로 기반 (HTTPS 리스너로 이동)
 resource "aws_lb_listener_rule" "api_rule" {
-  listener_arn = aws_lb_listener.http.arn
-  priority     = 90
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 10
 
   action {
     type             = "forward"
@@ -180,9 +199,10 @@ resource "aws_lb_listener_rule" "api_rule" {
   }
 }
 
+# ai-module — 경로 기반 (HTTPS 리스너로 이동)
 resource "aws_lb_listener_rule" "ai_rule" {
-  listener_arn = aws_lb_listener.http.arn
-  priority     = 100
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 20
 
   action {
     type             = "forward"
@@ -192,6 +212,23 @@ resource "aws_lb_listener_rule" "ai_rule" {
   condition {
     path_pattern {
       values = ["/ai", "/ai/*"]
+    }
+  }
+}
+
+# WebSocket — api-server
+resource "aws_lb_listener_rule" "ws_rule" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 5
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.spring_tg.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/ws", "/ws/*"]
     }
   }
 }

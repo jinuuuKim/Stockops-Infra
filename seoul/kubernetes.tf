@@ -71,6 +71,11 @@ resource "helm_release" "argocd" {
     name  = "server.service.type"
     value = "ClusterIP"
   }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "aws eks update-kubeconfig --region ap-northeast-2 --name seoul-cluster --profile siseon && kubectl delete crd applications.argoproj.io applicationsets.argoproj.io appprojects.argoproj.io --ignore-not-found"
+  }
 }
 
 # aws-auth ConfigMap — EKS 노드 Role + GitHub Actions Role 등록
@@ -94,6 +99,7 @@ resource "kubernetes_config_map_v1_data" "aws_auth" {
     ])
   }
   force = true
+  depends_on = [module.seoul_eks]
 }
 
 # --------------------------------------------------------------------------

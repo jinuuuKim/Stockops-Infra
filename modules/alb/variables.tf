@@ -16,3 +16,9 @@ variable "public_subnet_ids" {
   description = "ALB를 배치할 퍼블릭 서브넷 ID 목록"
   type        = list(string)
 }
+
+variable "acm_certificate_arn" {
+  description = "HTTPS 리스너용 ACM 인증서 ARN"
+  type        = string
+  default     = ""
+}

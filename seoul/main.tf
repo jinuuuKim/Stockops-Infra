@@ -17,10 +17,11 @@ module "seoul_vpc" {
 }
 
 module "seoul_alb" {
-  source            = "../modules/alb"
-  region_name       = "seoul"
-  vpc_id            = module.seoul_vpc.vpc_id
-  public_subnet_ids = module.seoul_vpc.public_subnet_ids
+  source              = "../modules/alb"
+  region_name         = "seoul"
+  vpc_id              = module.seoul_vpc.vpc_id
+  public_subnet_ids   = module.seoul_vpc.public_subnet_ids
+  acm_certificate_arn = aws_acm_certificate_validation.seoul.certificate_arn
 }
 
 module "seoul_eks" {

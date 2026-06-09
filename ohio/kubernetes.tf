@@ -60,6 +60,7 @@ resource "kubernetes_config_map_v1_data" "aws_auth" {
     ])
   }
   force = true
+  depends_on = [module.ohio_eks]
 }
 
 # --------------------------------------------------------------------------
@@ -233,6 +234,10 @@ resource "kubernetes_deployment_v1" "api_server" {
           env {
             name  = "MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS"
             value = "always"
+          }
+          env {
+            name  = "STOCKOPS_CORS_ALLOWED_ORIGINS"
+            value = "https://mellohn.cloud,https://admin.mellohn.cloud"
           }
         }
       }

@@ -36,3 +36,8 @@ output "fastapi_tg_arn" {
   description = "ai-module (FastAPI) 타겟 그룹 ARN"
   value       = aws_lb_target_group.fastapi_tg.arn
 }
+
+output "alb_zone_id" {
+  description = "ALB hosted zone ID (Route53 Alias 레코드용)"
+  value       = aws_lb.alb.zone_id
+}

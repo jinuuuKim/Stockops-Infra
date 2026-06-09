@@ -34,16 +34,17 @@ StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS
 | 레포 | 내용 |
 |------|------|
 | **Stockops-Infra** | Terraform IaC (modules + seoul + ohio + global) |
-| **Stockops-Application** | 앱 모노레포 (admin-web, ai-module, api-server, client-web) + GitHub Actions |
+| **Stockops-Application** | 앱 모노레포 (admin-web, ai-module, api-server, client-web, sensimul) + GitHub Actions |
 
 ### 애플리케이션 컴포넌트
 
-| 컴포넌트 | 기술 | 포트 | ALB 경로 |
-|----------|------|------|----------|
-| client-web | React + nginx | 80 | `/` (default) |
-| admin-web | React + nginx | 80 | `/admin` |
-| api-server | Spring Boot 3.2.12 / Java 21 | 8080 | `/api` |
-| ai-module | FastAPI | 8000 | `/ai` |
+| 컴포넌트 | 기술 | 포트 | 접속 도메인 |
+|----------|------|------|-------------|
+| client-web | React + nginx | 80 | `stockops.live` |
+| admin-web | React + nginx | 80 | `admin.stockops.live` |
+| api-server | Spring Boot 3.2 / Java 21 | 8080 | `/api/*` (ALB 경로 라우팅) |
+| ai-module | FastAPI | 8000 | `/ai/*` (ALB 경로 라우팅) |
+| sensimul | Go 1.23+ | - | 온프레미스 IoT 시뮬레이터 |
 
 ---
 
@@ -60,7 +61,8 @@ StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS
          ┌───────┘   └────────┐
          ▼                    ▼
      서울 ALB             오하이오 ALB
-     (풀스택)             (풀스택 미러)
+   (HTTPS 443)           (HTTPS 443)
+   호스트 기반 라우팅      호스트 기반 라우팅
          │                    │
      서울 EKS             오하이오 EKS
   api/ai/admin/client    api/ai/admin/client
@@ -80,9 +82,9 @@ StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS
 ```
 Stockops-Infra/
 ├── modules/          # 공통 모듈 (vpc, alb, eks, db, ecr, github-oidc, iot)
-├── seoul/            # 서울 리전 (본사, 풀스택)
-├── ohio/             # 오하이오 리전 (미국, 풀스택 미러)
-└── global/           # 글로벌 리소스 (Global Accelerator)
+├── seoul/            # 서울 리전 (본사, 풀스택) + Route53 호스팅 존 + 서울 ACM
+├── ohio/             # 오하이오 리전 (미국, 풀스택 미러) + 오하이오 ACM
+└── global/           # 글로벌 리소스 (Global Accelerator + Route53 A 레코드)
 ```
 
 ### Terraform State 구조 (S3 backend)
@@ -95,6 +97,16 @@ siseon-terraform-state/
     └── global/terraform.tfstate
 ```
 
+### DNS/도메인 관리 구조
+
+```
+seoul/dns.tf   → Route53 호스팅 존 + 서울 ACM (ap-northeast-2)
+ohio/dns.tf    → 오하이오 ACM (us-east-2)
+global/dns.tf  → Route53 A 레코드 (GA 연결)
+```
+
+> Route53 호스팅 존은 서울(본사)에서 관리. 도메인 NS는 도메인 등록 기관에서 Route53 NS로 교체.
+
 ---
 
 ## 배포된 AWS 리소스
@@ -103,13 +115,29 @@ siseon-terraform-state/
 |--------|------|----------|
 | VPC | 10.0.0.0/16 | 10.1.0.0/16 |
 | EKS | seoul-cluster v1.30 | ohio-cluster v1.30 |
-| ALB | 경로 기반 라우팅 | 경로 기반 라우팅 |
+| ALB | HTTPS + 호스트/경로 기반 라우팅 | HTTPS + 호스트/경로 기반 라우팅 |
 | RDS | PostgreSQL 16 (Master) | Read Replica |
 | ECR | 4개 리포 (원본) | replication 자동 복제 |
+| ACM | mellohn.cloud 와일드카드 | mellohn.cloud 와일드카드 |
 | IoT Core + SQS | ✅ | — (서울만) |
-| Secrets Manager | ✅ | ✅ (예정) |
+| Secrets Manager | ✅ | ✅ |
+| Route53 호스팅 존 | ✅ | — |
 
-**글로벌**: Global Accelerator (서울 + 오하이오 ALB 엔드포인트)
+**글로벌**: Global Accelerator (HTTP/HTTPS 리스너 + 서울/오하이오 ALB 엔드포인트)
+
+---
+
+## ALB 라우팅 규칙
+
+| Priority | 조건 | 대상 |
+|----------|------|------|
+| 5 | `/ws`, `/ws/*` | api-server (WebSocket) |
+| 10 | `/api`, `/api/*` | api-server |
+| 20 | `/ai`, `/ai/*` | ai-module |
+| 85 | `admin.{domain}` (호스트) | admin-web |
+| default | 나머지 | client-web |
+
+> HTTP(80) → HTTPS(301) 리다이렉트 적용
 
 ---
 
@@ -118,14 +146,16 @@ siseon-terraform-state/
 ```
 GitHub Actions (CI)
     └─ main push / workflow_dispatch
-         └─ 이미지 빌드 → 서울 ECR push (OIDC 인증, 액세스 키 없음)
-              └─ 서울 ECR → 오하이오 ECR 자동 replication
-                   └─ kubectl rollout restart (EKS 재배포)
+         └─ 이미지 빌드 (nginx.aws.conf 적용)
+              └─ 서울 ECR push (OIDC 인증, 액세스 키 없음)
+                   └─ 서울 ECR → 오하이오 ECR 자동 replication
+                        └─ kubectl rollout restart (EKS 재배포)
 
 ArgoCD (CD) — 설치 완료, 앱 구성 예정
-    └─ GitOps 방식 배포
+    └─ GitOps 방식 배포 (허브-스포크: 서울 ArgoCD가 서울+오하이오 관리)
 ```
 
+> admin-web, client-web 빌드 시 `--build-arg NGINX_CONF=nginx.aws.conf` 적용 필수.
 > GitHub Actions Role은 EKS `aws-auth` ConfigMap에 등록되어 있어야 `kubectl rollout restart`가 동작한다 (Terraform 관리).
 
 ---
@@ -148,12 +178,15 @@ Secrets Manager (stockops/app)
 
 ```
 온프레미스 센서 (sensormqtt.ithans.com)
-    └─ Mosquitto 브리지 (TLS:8883) — 설정 대기 중
+    └─ Mosquitto 브리지 (TLS:8883)
          └─ AWS IoT Core (sensimul/sites/+/sensors/+)
               └─ IoT Rule → SQS (stockops-sensor-data)
+                   └─ api-server 처리
 ```
 
 현장 ID: `TEST_INDOOR_01` / 센서 7종: TEMP, HUM, PM25, PM10, PRESSURE, DOOR, PRESENCE
+
+> destroy/재apply 시 IoT 인증서 새로 발급 → 온프레미스 브리지 재설정 필요.
 
 ---
 
@@ -169,43 +202,39 @@ Secrets Manager (stockops/app)
 ```powershell
 # 1. 서울
 cd seoul
-terraform apply --% -auto-approve -target=module.seoul_vpc -target=module.seoul_alb -target=module.seoul_eks -target=module.seoul_db -target=module.seoul_ecr
 aws eks update-kubeconfig --region ap-northeast-2 --name seoul-cluster --profile siseon
 terraform apply -auto-approve
 
 # 2. 오하이오
 cd ..\ohio
+terraform apply --% -auto-approve -target=aws_acm_certificate.ohio -target=aws_route53_record.cert_validation -target=aws_acm_certificate_validation.ohio
 terraform apply --% -auto-approve -target=module.ohio_vpc -target=module.ohio_alb -target=module.ohio_eks -target=aws_db_instance.ohio_replica
 aws eks update-kubeconfig --region us-east-2 --name ohio-cluster --profile siseon
 terraform apply -auto-approve
 
-# 3. 글로벌 (GA)
+# 3. 글로벌 (GA + Route53 A 레코드)
 cd ..\global
-terraform init
 terraform apply -auto-approve
 ```
 
 > Cross-Region Replica(오하이오 RDS)는 생성에 약 25분 소요.
+> ACM 검증은 도메인 NS 전파 후 자동 완료 (5~15분).
 
 ### 애플리케이션 이미지 배포 (GitHub Actions)
 
-인프라(ECR) 생성 후 Stockops-Application 레포에서 이미지를 빌드/푸시한다.
-
 ```powershell
-# main 브랜치 push 또는 수동 트리거
 gh workflow run deploy.yml
 ```
 
-- GitHub Actions가 OIDC로 인증 → 4개 이미지 빌드 → 서울 ECR push
+- GitHub Actions가 OIDC로 인증 → 4개 이미지 빌드 (nginx.aws.conf 적용) → 서울 ECR push
 - 서울 ECR → 오하이오 ECR 자동 replication
-- 이어서 `kubectl rollout restart`로 EKS 파드 재배포
-- 이미지가 ECR에 올라오면 `ImagePullBackOff` 상태였던 Pod가 자동으로 다시 pull → Running
+- `kubectl rollout restart`로 EKS 파드 재배포
 
 ### 검증
 
 ```powershell
 kubectl get pods -n stockops
-terraform output global_accelerator_dns
+terraform output -json -chdir=global
 ```
 
 ### 초기 로그인 계정
@@ -216,7 +245,7 @@ terraform output global_accelerator_dns
 
 ## 종료 (destroy)
 
-역순으로 진행 (global → ohio → seoul).
+**반드시 역순으로 진행 (global → ohio → seoul)**
 
 ```powershell
 # 1. 글로벌
@@ -228,24 +257,42 @@ cd ..\ohio
 terraform destroy --% -auto-approve -target=kubectl_manifest.client_tgb -target=kubectl_manifest.admin_tgb -target=kubectl_manifest.api_tgb -target=kubectl_manifest.ai_tgb
 terraform destroy -auto-approve
 
-# 3. 서울 (TGB 먼저)
+# 3. 서울 (ArgoCD CRD + TGB 먼저)
 cd ..\seoul
+kubectl delete crd applications.argoproj.io applicationsets.argoproj.io appprojects.argoproj.io --ignore-not-found
 terraform destroy --% -auto-approve -target=kubectl_manifest.client_tgb -target=kubectl_manifest.admin_tgb -target=kubectl_manifest.api_tgb -target=kubectl_manifest.ai_tgb
 terraform destroy -auto-approve
 ```
 
+> destroy 순서 위반 시 Cross-Region ACM 참조 에러 발생.
 > Global Accelerator는 ALB를 참조하므로 반드시 먼저 삭제.
 > 오하이오 RDS(Replica)는 서울 RDS보다 먼저 삭제.
 
 ### destroy 후 잔재 확인
 
 ```powershell
-aws ec2 describe-nat-gateways --filter "Name=state,Values=available" --query "NatGateways[*].NatGatewayId" --output table --region ap-northeast-2
-aws ec2 describe-nat-gateways --filter "Name=state,Values=available" --query "NatGateways[*].NatGatewayId" --output table --region us-east-2
-aws iam list-roles --query "Roles[?contains(RoleName, 'seoul') || contains(RoleName, 'ohio') || contains(RoleName, 'stockops')].RoleName" --output table
+aws ec2 describe-vpcs --region ap-northeast-2 --profile siseon --query "Vpcs[?IsDefault=='false'].VpcId"
+aws ec2 describe-vpcs --region us-east-2 --profile siseon --query "Vpcs[?IsDefault=='false'].VpcId"
+aws eks list-clusters --region ap-northeast-2 --profile siseon
+aws eks list-clusters --region us-east-2 --profile siseon
+aws globalaccelerator list-accelerators --region us-west-2 --profile siseon --query "Accelerators[*].Name"
 ```
 
-> destroy 후 재apply 시 IoT 인증서 새로 발급 → 온프레미스 브리지 재설정 필요.
+---
+
+## IoT 인증서 추출 (현수님 전달용)
+
+```powershell
+# destroy/재apply 후 실행
+$cert = terraform output -json certificate_pem | ConvertFrom-Json
+[System.IO.File]::WriteAllText("$PWD\mosquitto-bridge.cert.pem", $cert)
+
+$key = terraform output -json private_key | ConvertFrom-Json
+[System.IO.File]::WriteAllText("$PWD\mosquitto-bridge.private.key", $key)
+
+# AmazonRootCA1.pem (고정값)
+Invoke-WebRequest -Uri "https://www.amazontrust.com/repository/AmazonRootCA1.pem" -OutFile "AmazonRootCA1.pem"
+```
 
 ---
 
@@ -259,11 +306,17 @@ aws iam list-roles --query "Roles[?contains(RoleName, 'seoul') || contains(RoleN
 - [x] ArgoCD 설치
 - [x] 멀티 리전 (오하이오) 풀스택 + ECR replication
 - [x] Cross-Region RDS Read Replica
-- [x] Global Accelerator
-- [ ] Route 53 + ACM — 도메인 연결 + 호스트 기반 라우팅 (admin/client 분리)
+- [x] Global Accelerator (HTTP/HTTPS 리스너)
+- [x] Route53 + ACM — HTTPS 도메인 연결 (mellohn.cloud 테스트)
+- [x] ALB 호스트 기반 라우팅 (admin/client 서브도메인 분리)
+- [x] WebSocket ALB 룰 추가 (`/ws`)
+- [x] nginx.aws.conf 적용 (ALB 환경 전용 nginx 설정)
+- [x] CORS 환경변수 적용 (`STOCKOPS_CORS_ALLOWED_ORIGINS`)
+- [x] IoT 브리지 연결 확인
+- [ ] 팀 도메인 연결 (stockops.live)
 - [ ] WAF — ALB/GA 앞단 보안
 - [ ] ArgoCD 앱 구성 (GitOps CD)
-- [ ] IoT 브리지 연결 확인
+- [ ] Cluster Autoscaler + HPA
 - [ ] 서울 RDS Multi-AZ 활성화
 - [ ] Azure 트랜잭션 로그 백업 (3차 방어)
 - [ ] Observability 스택
