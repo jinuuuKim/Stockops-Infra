@@ -22,7 +22,7 @@ resource "aws_subnet" "pub_sub_2a" {
   tags = {
     Name                                  = "${var.region_name}-pub-sub-2a"
     "kubernetes.io/role/elb"              = "1"
-    "kubernetes.io/cluster/seoul-cluster" = "shared"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 }
 
@@ -35,7 +35,7 @@ resource "aws_subnet" "pub_sub_2c" {
   tags = {
     Name                                  = "${var.region_name}-pub-sub-2c"
     "kubernetes.io/role/elb"              = "1"
-    "kubernetes.io/cluster/seoul-cluster" = "shared"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 }
 
@@ -48,7 +48,8 @@ resource "aws_subnet" "priv_app_sub_2a" {
   tags = {
     Name                                  = "${var.region_name}-priv-app-2a"
     "kubernetes.io/role/internal-elb"     = "1"
-    "kubernetes.io/cluster/seoul-cluster" = "shared"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    "karpenter.sh/discovery"                    = var.cluster_name
   }
 }
 
@@ -60,7 +61,8 @@ resource "aws_subnet" "priv_app_sub_2c" {
   tags = {
     Name                                  = "${var.region_name}-priv-app-2c"
     "kubernetes.io/role/internal-elb"     = "1"
-    "kubernetes.io/cluster/seoul-cluster" = "shared"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    "karpenter.sh/discovery"                    = var.cluster_name
   }
 }
 

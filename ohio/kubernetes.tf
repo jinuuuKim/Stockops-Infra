@@ -57,6 +57,11 @@ resource "kubernetes_config_map_v1_data" "aws_auth" {
         username = "system:node:{{EC2PrivateDNSName}}"
         groups   = ["system:bootstrappers", "system:nodes"]
       },
+      {
+        rolearn  = "arn:aws:iam::448768137813:role/${module.ohio_karpenter.node_role_name}"
+        username = "system:node:{{EC2PrivateDNSName}}"
+        groups   = ["system:bootstrappers", "system:nodes"]
+      }
     ])
   }
   force = true
@@ -85,6 +90,16 @@ resource "kubernetes_deployment_v1" "client_web" {
           image             = "448768137813.dkr.ecr.us-east-2.amazonaws.com/stockops-client-web:latest"
           image_pull_policy = "Always"
           port { container_port = 80 }
+          resources {
+            requests = {
+              cpu    = "50m"
+              memory = "64Mi"
+            }
+            limits = {
+              cpu    = "200m"
+              memory = "128Mi"
+            }
+          }
         }
       }
     }
@@ -128,6 +143,16 @@ resource "kubernetes_deployment_v1" "admin_web" {
           image             = "448768137813.dkr.ecr.us-east-2.amazonaws.com/stockops-admin-web:latest"
           image_pull_policy = "Always"
           port { container_port = 80 }
+          resources {
+            requests = {
+              cpu    = "50m"
+              memory = "64Mi"
+            }
+            limits = {
+              cpu    = "200m"
+              memory = "128Mi"
+            }
+          }
         }
       }
     }
@@ -171,7 +196,16 @@ resource "kubernetes_deployment_v1" "api_server" {
           image             = "448768137813.dkr.ecr.us-east-2.amazonaws.com/stockops-api:latest"
           image_pull_policy = "Always"
           port { container_port = 8080 }
-
+          resources {
+            requests = {
+              cpu    = "250m"
+              memory = "512Mi"
+            }
+            limits = {
+              cpu    = "500m"
+              memory = "1Gi"
+            }
+          }
           env {
             name  = "SPRING_PROFILES_ACTIVE"
             value = "dev"
@@ -282,6 +316,16 @@ resource "kubernetes_deployment_v1" "ai_module" {
           image             = "448768137813.dkr.ecr.us-east-2.amazonaws.com/stockops-ai:latest"
           image_pull_policy = "Always"
           port { container_port = 8000 }
+          resources {
+            requests = {
+              cpu    = "250m"
+              memory = "512Mi"
+            }
+            limits = {
+              cpu    = "500m"
+              memory = "1Gi"
+            }
+          }
         }
       }
     }
@@ -323,6 +367,16 @@ resource "kubernetes_deployment_v1" "redis" {
           name  = "redis"
           image = "redis:7-alpine"
           port { container_port = 6379 }
+          resources {
+            requests = {
+              cpu    = "100m"
+              memory = "128Mi"
+            }
+            limits = {
+              cpu    = "200m"
+              memory = "256Mi"
+            }
+          }
         }
       }
     }
@@ -485,4 +539,74 @@ resource "kubernetes_annotations" "eso_sa" {
     "eks.amazonaws.com/role-arn" = aws_iam_role.eso.arn
   }
   depends_on = [helm_release.external_secrets]
+}
+
+# --------------------------------------------------------------------------
+# HPA — api-server
+# --------------------------------------------------------------------------
+
+resource "kubernetes_horizontal_pod_autoscaler_v2" "api_hpa" {
+  metadata {
+    name      = "stockops-api-hpa"
+    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+  }
+  spec {
+    min_replicas = 1
+    max_replicas = 4
+    scale_target_ref {
+      api_version = "apps/v1"
+      kind        = "Deployment"
+      name        = "stockops-api"
+    }
+    metric {
+      type = "Resource"
+      resource {
+        name = "cpu"
+        target {
+          type                = "Utilization"
+          average_utilization = 60
+        }
+      }
+    }
+  }
+}
+
+# --------------------------------------------------------------------------
+# HPA — ai-module
+# --------------------------------------------------------------------------
+
+resource "kubernetes_horizontal_pod_autoscaler_v2" "ai_hpa" {
+  metadata {
+    name      = "stockops-ai-hpa"
+    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+  }
+  spec {
+    min_replicas = 1
+    max_replicas = 4
+    scale_target_ref {
+      api_version = "apps/v1"
+      kind        = "Deployment"
+      name        = "stockops-ai"
+    }
+    metric {
+      type = "Resource"
+      resource {
+        name = "cpu"
+        target {
+          type                = "Utilization"
+          average_utilization = 60
+        }
+      }
+    }
+    metric {
+      type = "Resource"
+      resource {
+        name = "memory"
+        target {
+          type                = "Utilization"
+          average_utilization = 70
+        }
+      }
+    }
+  }
 }

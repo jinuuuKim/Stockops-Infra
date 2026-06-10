@@ -14,11 +14,6 @@ resource "aws_iot_thing" "bridge" {
   name = var.thing_name
 }
 
-# X.509 인증서 (Terraform 생성, apply 후 팀장님께 전달)
-resource "aws_iot_certificate" "bridge" {
-  active = true
-}
-
 resource "aws_iot_policy" "bridge" {
   name = "${var.thing_name}-policy"
 
@@ -42,12 +37,12 @@ resource "aws_iot_policy" "bridge" {
 # Thing ↔ 인증서 ↔ 정책 연결
 resource "aws_iot_thing_principal_attachment" "bridge" {
   thing     = aws_iot_thing.bridge.name
-  principal = aws_iot_certificate.bridge.arn
+  principal = var.iot_certificate_arn
 }
 
 resource "aws_iot_policy_attachment" "bridge" {
   policy = aws_iot_policy.bridge.name
-  target = aws_iot_certificate.bridge.arn
+  target = var.iot_certificate_arn
 }
 
 # ==========================================================================

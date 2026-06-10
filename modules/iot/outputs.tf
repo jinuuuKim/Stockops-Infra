@@ -4,24 +4,6 @@
 # 추출: terraform output -raw certificate_pem > mosquitto-bridge.cert.pem
 # ==========================================================================
 
-output "certificate_pem" {
-  description = "Mosquitto bridge_certfile용 인증서 PEM"
-  value       = aws_iot_certificate.bridge.certificate_pem
-  sensitive   = true
-}
-
-output "private_key" {
-  description = "Mosquitto bridge_keyfile용 프라이빗 키"
-  value       = aws_iot_certificate.bridge.private_key
-  sensitive   = true
-}
-
-output "public_key" {
-  description = "IoT 퍼블릭 키 (참고용)"
-  value       = aws_iot_certificate.bridge.public_key
-  sensitive   = true
-}
-
 output "iot_endpoint" {
   description = "IoT Core 엔드포인트 추출 명령어"
   value       = "aws iot describe-endpoint --endpoint-type iot:Data-ATS --profile siseon --query endpointAddress --output text"

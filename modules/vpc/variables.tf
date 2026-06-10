@@ -51,3 +51,8 @@ variable "priv_db_sub_2c_cidr" {
   description = "프라이빗 DB 서브넷 AZ-c CIDR"
   type        = string
 }
+
+variable "cluster_name" {
+  description = "EKS 클러스터 이름 (서브넷 태그용)"
+  type        = string
+}

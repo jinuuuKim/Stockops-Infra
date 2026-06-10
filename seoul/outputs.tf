@@ -32,18 +32,6 @@ output "account_id" {
   value       = data.aws_caller_identity.current.account_id
 }
 
-output "certificate_pem" {
-  description = "IoT 브리지 인증서 PEM (팀장님 전달용)"
-  value       = module.seoul_iot.certificate_pem
-  sensitive   = true
-}
-
-output "private_key" {
-  description = "IoT 브리지 프라이빗 키 (팀장님 전달용)"
-  value       = module.seoul_iot.private_key
-  sensitive   = true
-}
-
 output "sensor_sqs_queue_url" {
   description = "IoT 센서 데이터 SQS 큐 URL"
   value       = module.seoul_iot.sqs_queue_url

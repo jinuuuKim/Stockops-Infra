@@ -46,3 +46,8 @@ output "lbc_role_policy_attachment" {
   description = "LBC IAM Role 정책 연결 ID"
   value       = aws_iam_role_policy_attachment.lbc.id
 }
+
+output "node_role_arn" {
+  description = "EKS 워커 노드 IAM Role ARN"
+  value       = aws_iam_role.node_role.arn
+}

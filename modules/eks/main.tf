@@ -33,6 +33,11 @@ resource "aws_eks_cluster" "this" {
     endpoint_public_access  = true
   }
 
+  tags = {
+    Name                     = "${var.region_name}-cluster"
+    "karpenter.sh/discovery" = "${var.region_name}-cluster"
+  }
+
   depends_on = [aws_iam_role_policy_attachment.cluster_policy]
 }
 
@@ -83,6 +88,12 @@ resource "aws_security_group_rule" "db_ingress_from_eks" {
   protocol                 = "tcp"
   security_group_id        = var.db_sg_id
   source_security_group_id = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+}
+
+resource "aws_ec2_tag" "cluster_sg_karpenter" {
+  resource_id = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+  key         = "karpenter.sh/discovery"
+  value       = "${var.region_name}-cluster"
 }
 
 # 관리형 노드 그룹

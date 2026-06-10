@@ -14,6 +14,7 @@ module "seoul_vpc" {
   priv_app_sub_2c_cidr = "10.0.12.0/24"
   priv_db_sub_2a_cidr  = "10.0.21.0/24"
   priv_db_sub_2c_cidr  = "10.0.22.0/24"
+  cluster_name = "seoul-cluster"
 }
 
 module "seoul_alb" {
@@ -38,6 +39,20 @@ module "seoul_eks" {
   node_desired = 2
   node_min     = 2
   node_max     = 4
+}
+
+module "seoul_karpenter" {
+  source = "../modules/karpenter"
+
+  cluster_name      = "seoul-cluster"
+  cluster_endpoint  = module.seoul_eks.cluster_endpoint
+  oidc_provider_arn = module.seoul_eks.oidc_provider_arn
+  oidc_provider     = module.seoul_eks.oidc_provider
+  region_name       = "seoul"
+  node_role_arn     = module.seoul_eks.node_role_arn
+  create_spot_service_linked_role = true
+
+  depends_on = [module.seoul_eks]
 }
 
 module "seoul_db" {

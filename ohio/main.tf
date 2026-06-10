@@ -14,6 +14,7 @@ module "ohio_vpc" {
   priv_app_sub_2c_cidr = "10.1.12.0/24"
   priv_db_sub_2a_cidr  = "10.1.21.0/24"
   priv_db_sub_2c_cidr  = "10.1.22.0/24"
+  cluster_name = "ohio-cluster"
 }
 
 module "ohio_alb" {
@@ -38,6 +39,20 @@ module "ohio_eks" {
   node_desired = 1
   node_min     = 1
   node_max     = 4
+}
+
+module "ohio_karpenter" {
+  source = "../modules/karpenter"
+
+  cluster_name      = "ohio-cluster"
+  cluster_endpoint  = module.ohio_eks.cluster_endpoint
+  oidc_provider_arn = module.ohio_eks.oidc_provider_arn
+  oidc_provider     = module.ohio_eks.oidc_provider
+  region_name       = "ohio"
+  node_role_arn     = module.ohio_eks.node_role_arn
+  karpenter_replicas = 1
+  
+  depends_on = [module.ohio_eks]
 }
 
 # RDS Read Replica (서울 Master → 오하이오 Replica)

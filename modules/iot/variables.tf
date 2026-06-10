@@ -31,3 +31,8 @@ variable "dlq_max_receive_count" {
   type        = number
   default     = 3
 }
+
+variable "iot_certificate_arn" {
+  description = "IoT 인증서 ARN (콘솔에서 발급, destroy 후에도 유지)"
+  type        = string
+}

@@ -10,4 +10,5 @@ module "seoul_iot" {
   topic_prefix   = "sensimul/sites"
   sqs_queue_name = "stockops-sensor-data"
   sqs_dlq_name   = "stockops-sensor-data-dlq"
+  iot_certificate_arn = "arn:aws:iot:ap-northeast-2:448768137813:cert/c4ac7c856fb6d989679beb685b379df60d7077cdf4f3543593af3ccfeefac826"
 }
