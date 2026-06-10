@@ -13,11 +13,11 @@ data "terraform_remote_state" "seoul" {
 }
 
 resource "aws_acm_certificate" "ohio" {
-  domain_name               = "mellohn.cloud"
-  subject_alternative_names = ["*.mellohn.cloud"]
+  domain_name               = var.domain
+  subject_alternative_names = ["*.${var.domain}"]
   validation_method         = "DNS"
   lifecycle { create_before_destroy = true }
-  tags = { Name = "mellohn-cloud-cert-ohio" }
+  tags = { Name = "${var.domain}-cert-ohio" }
 }
 
 resource "aws_route53_record" "cert_validation" {

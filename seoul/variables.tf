@@ -20,3 +20,13 @@ variable "db_password" {
   type        = string
   sensitive   = true
 }
+
+variable "domain" {
+  type    = string
+  default = "siseon.live"
+}
+
+variable "delegation_set_id" {
+  type    = string
+  default = "N02295603ILJ5HVTJBLTY"
+}

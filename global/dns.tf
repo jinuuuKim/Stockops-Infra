@@ -4,22 +4,22 @@
 
 resource "aws_route53_record" "root" {
   zone_id = data.terraform_remote_state.seoul.outputs.route53_zone_id
-  name    = "mellohn.cloud"
+  name    = var.domain
   type    = "A"
   alias {
     name                   = aws_globalaccelerator_accelerator.stockops.dns_name
-    zone_id                = "Z2BJ6XQ5FK7U4H"
+    zone_id                = aws_globalaccelerator_accelerator.stockops.hosted_zone_id
     evaluate_target_health = false
   }
 }
 
-resource "aws_route53_record" "admin" {
+resource "aws_route53_record" "app" {
   zone_id = data.terraform_remote_state.seoul.outputs.route53_zone_id
-  name    = "admin.mellohn.cloud"
+  name    = "app.${var.domain}"
   type    = "A"
   alias {
     name                   = aws_globalaccelerator_accelerator.stockops.dns_name
-    zone_id                = "Z2BJ6XQ5FK7U4H"
+    zone_id                = aws_globalaccelerator_accelerator.stockops.hosted_zone_id
     evaluate_target_health = false
   }
 }

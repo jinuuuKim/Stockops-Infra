@@ -22,6 +22,7 @@ module "ohio_alb" {
   vpc_id              = module.ohio_vpc.vpc_id
   public_subnet_ids   = module.ohio_vpc.public_subnet_ids
   acm_certificate_arn = aws_acm_certificate_validation.ohio.certificate_arn
+  domain              = var.domain
 }
 
 module "ohio_eks" {
@@ -34,6 +35,9 @@ module "ohio_eks" {
   frontend_tg_arn     = module.ohio_alb.frontend_tg_arn
   spring_tg_arn       = module.ohio_alb.spring_tg_arn
   fastapi_tg_arn      = module.ohio_alb.fastapi_tg_arn
+  node_desired = 1
+  node_min     = 1
+  node_max     = 4
 }
 
 # RDS Read Replica (서울 Master → 오하이오 Replica)

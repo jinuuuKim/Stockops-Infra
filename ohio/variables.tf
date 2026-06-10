@@ -25,3 +25,8 @@ variable "seoul_db_identifier" {
   type        = string
   default     = "seoul-rds-postgres"
 }
+
+variable "domain" {
+  type    = string
+  default = "siseon.live"
+}

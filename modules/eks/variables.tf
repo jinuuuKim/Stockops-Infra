@@ -41,3 +41,18 @@ variable "fastapi_tg_arn" {
   description = "ai-module ALB 타겟 그룹 ARN"
   type        = string
 }
+
+variable "node_desired" {
+  type    = number
+  default = 1
+}
+
+variable "node_min" {
+  type    = number
+  default = 1
+}
+
+variable "node_max" {
+  type    = number
+  default = 4
+}

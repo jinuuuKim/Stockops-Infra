@@ -3,16 +3,17 @@
 # ==========================================================================
 
 resource "aws_route53_zone" "main" {
-  name = "mellohn.cloud"
-  tags = { Name = "mellohn-cloud-zone" }
+  name              = var.domain
+  delegation_set_id = var.delegation_set_id
+  tags = { Name = "${var.domain}-zone" }
 }
 
 resource "aws_acm_certificate" "seoul" {
-  domain_name               = "mellohn.cloud"
-  subject_alternative_names = ["*.mellohn.cloud"]
+  domain_name               = var.domain
+  subject_alternative_names = ["*.${var.domain}"]
   validation_method         = "DNS"
   lifecycle { create_before_destroy = true }
-  tags = { Name = "mellohn-cloud-cert-seoul" }
+  tags = { Name = "${var.domain}-cert-seoul" }
 }
 
 resource "aws_route53_record" "cert_validation" {

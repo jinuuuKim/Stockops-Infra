@@ -22,3 +22,8 @@ variable "acm_certificate_arn" {
   type        = string
   default     = ""
 }
+
+variable "domain" {
+  type    = string
+  default = "siseon.live"
+}

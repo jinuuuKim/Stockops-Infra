@@ -177,7 +177,7 @@ resource "aws_lb_listener_rule" "admin_rule" {
 
   condition {
     host_header {
-      values = ["admin.mellohn.cloud"]
+      values = ["app.${var.domain}"]
     }
   }
 }

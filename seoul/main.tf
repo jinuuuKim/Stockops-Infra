@@ -22,6 +22,7 @@ module "seoul_alb" {
   vpc_id              = module.seoul_vpc.vpc_id
   public_subnet_ids   = module.seoul_vpc.public_subnet_ids
   acm_certificate_arn = aws_acm_certificate_validation.seoul.certificate_arn
+  domain              = var.domain
 }
 
 module "seoul_eks" {
@@ -34,6 +35,9 @@ module "seoul_eks" {
   frontend_tg_arn     = module.seoul_alb.frontend_tg_arn
   spring_tg_arn       = module.seoul_alb.spring_tg_arn
   fastapi_tg_arn      = module.seoul_alb.fastapi_tg_arn
+  node_desired = 2
+  node_min     = 2
+  node_max     = 4
 }
 
 module "seoul_db" {

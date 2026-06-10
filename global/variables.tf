@@ -1,5 +1,8 @@
-variable "ohio_alb_arn" {
-  description = "오하이오 ALB ARN (ohio 배포 후 입력)"
-  type        = string
-  default     = ""
+# ==========================================================================
+# 글로벌 리소스 — 입력 변수
+# ==========================================================================
+
+variable "domain" {
+  type    = string
+  default = "siseon.live"
 }
