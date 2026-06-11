@@ -360,10 +360,11 @@ Invoke-WebRequest -Uri "https://www.amazontrust.com/repository/AmazonRootCA1.pem
 - [x] WebSocket ALB 룰 (`/ws`)
 - [x] **정적 프론트 CloudFront + S3(OAC) 전환** (client/admin nginx EKS 제거, ALB 타깃그룹 정리)
 - [x] IoT 브리지 연결 확인
-- [ ] 멀티리전 ECR 직접 push(Option B) + 이미지 SHA 태그 (CRR race 제거, 리전별 롤백)
+- [x] 멀티리전 ECR 직접 push(Option B) + 이미지 SHA 태그 (CRR race 제거, 리전별 롤백)
+- [x] 서울 RDS Multi-AZ 활성화
+- [ ] **api-server SQS 컨슈머** (협업) · SQS 소비 → RDS 반영 + 임계치 판정 + `/ws` 푸시, 처리 후 메시지 삭제
 - [ ] WAF — ALB/GA/CloudFront 앞단 보안
 - [ ] ArgoCD 앱 구성 (GitOps CD)
-- [ ] 서울 RDS Multi-AZ 활성화
 - [ ] Azure 트랜잭션 로그 백업 (3차 방어)
 - [ ] Observability 스택 (Grafana/Prometheus)
 
