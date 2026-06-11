@@ -33,7 +33,6 @@ module "ohio_eks" {
   priv_app_subnet_ids = module.ohio_vpc.priv_app_subnet_ids
   app_sg_id           = aws_security_group.ohio_app_sg.id
   db_sg_id            = aws_security_group.ohio_db_sg.id
-  frontend_tg_arn     = module.ohio_alb.frontend_tg_arn
   spring_tg_arn       = module.ohio_alb.spring_tg_arn
   fastapi_tg_arn      = module.ohio_alb.fastapi_tg_arn
   node_desired = 1
