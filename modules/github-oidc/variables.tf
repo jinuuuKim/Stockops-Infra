@@ -30,3 +30,9 @@ variable "role_name" {
   type        = string
   default     = "github-actions-ecr-push"
 }
+
+variable "frontend_bucket_names" {
+  description = "정적 프론트 S3 버킷 이름 목록 (s3 sync 배포 대상)"
+  type        = list(string)
+  default     = ["siseon-frontend-client", "siseon-frontend-admin"]
+}

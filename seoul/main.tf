@@ -33,7 +33,6 @@ module "seoul_eks" {
   priv_app_subnet_ids = module.seoul_vpc.priv_app_subnet_ids
   app_sg_id           = aws_security_group.seoul_app_sg.id
   db_sg_id            = aws_security_group.seoul_db_sg.id
-  frontend_tg_arn     = module.seoul_alb.frontend_tg_arn
   spring_tg_arn       = module.seoul_alb.spring_tg_arn
   fastapi_tg_arn      = module.seoul_alb.fastapi_tg_arn
   node_desired = 2
@@ -69,27 +68,9 @@ module "seoul_ecr" {
   for_each = toset([
     "stockops-api",
     "stockops-ai",
-    "stockops-admin-web",
-    "stockops-client-web",
   ])
   region_name     = "seoul"
   repository_name = each.value
-}
-
-# ECR Cross-Region Replication (서울 → 오하이오)
-resource "aws_ecr_replication_configuration" "this" {
-  replication_configuration {
-    rule {
-      destination {
-        region      = "us-east-2"
-        registry_id = data.aws_caller_identity.current.account_id
-      }
-      repository_filter {
-        filter      = "stockops"
-        filter_type = "PREFIX_MATCH"
-      }
-    }
-  }
 }
 
 data "aws_caller_identity" "current" {}

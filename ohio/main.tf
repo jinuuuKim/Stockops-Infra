@@ -71,6 +71,16 @@ resource "aws_db_instance" "ohio_replica" {
   }
 }
 
+module "ohio_ecr" {
+  source   = "../modules/ecr"
+  for_each = toset([
+    "stockops-api",
+    "stockops-ai",
+  ])
+  region_name     = "ohio"
+  repository_name = each.value
+}
+
 resource "aws_db_subnet_group" "ohio" {
   name       = "ohio-db-subnet-group"
   subnet_ids = module.ohio_vpc.priv_db_subnet_ids

@@ -47,46 +47,6 @@ resource "aws_lb" "alb" {
   }
 }
 
-# 타겟 그룹 — admin-web (Port 80)
-resource "aws_lb_target_group" "admin_tg" {
-  name        = "${var.region_name}-admin-tg"
-  port        = 80
-  protocol    = "HTTP"
-  vpc_id      = var.vpc_id
-  target_type = "ip"
-
-  health_check {
-    enabled             = true
-    path                = "/"
-    port                = "80"
-    protocol            = "HTTP"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 3
-    unhealthy_threshold = 3
-  }
-}
-
-# 타겟 그룹 — client-web (Port 80)
-resource "aws_lb_target_group" "frontend_tg" {
-  name        = "${var.region_name}-frontend-tg"
-  port        = 80
-  protocol    = "HTTP"
-  vpc_id      = var.vpc_id
-  target_type = "ip"
-
-  health_check {
-    enabled             = true
-    path                = "/"
-    port                = "80"
-    protocol            = "HTTP"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 3
-    unhealthy_threshold = 3
-  }
-}
-
 # 타겟 그룹 — api-server (Port 8080)
 resource "aws_lb_target_group" "spring_tg" {
   name        = "${var.region_name}-spring-tg"
@@ -160,24 +120,11 @@ resource "aws_lb_listener" "https" {
   certificate_arn   = var.acm_certificate_arn
 
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.frontend_tg.arn
-  }
-}
-
-# admin-web — 호스트 기반 라우팅
-resource "aws_lb_listener_rule" "admin_rule" {
-  listener_arn = aws_lb_listener.https.arn
-  priority     = 85
-
-  action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.admin_tg.arn
-  }
-
-  condition {
-    host_header {
-      values = ["app.${var.domain}"]
+    type = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "Not Found"
+      status_code  = "404"
     }
   }
 }

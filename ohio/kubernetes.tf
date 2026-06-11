@@ -61,117 +61,16 @@ resource "kubernetes_config_map_v1_data" "aws_auth" {
         rolearn  = "arn:aws:iam::448768137813:role/${module.ohio_karpenter.node_role_name}"
         username = "system:node:{{EC2PrivateDNSName}}"
         groups   = ["system:bootstrappers", "system:nodes"]
-      }
+      },
+      {
+        rolearn  = "arn:aws:iam::448768137813:role/github-actions-ecr-push"
+        username = "github-actions"
+        groups   = ["system:masters"]
+      },
     ])
   }
   force = true
   depends_on = [module.ohio_eks]
-}
-
-# --------------------------------------------------------------------------
-# client-web (사용자 포털, Port 80)
-# --------------------------------------------------------------------------
-
-resource "kubernetes_deployment_v1" "client_web" {
-  wait_for_rollout = false
-  metadata {
-    name      = "stockops-client-web"
-    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
-    labels    = { app = "stockops-client-web" }
-  }
-  spec {
-    replicas = 1
-    selector { match_labels = { app = "stockops-client-web" } }
-    template {
-      metadata { labels = { app = "stockops-client-web" } }
-      spec {
-        container {
-          name              = "client-web-container"
-          image             = "448768137813.dkr.ecr.us-east-2.amazonaws.com/stockops-client-web:latest"
-          image_pull_policy = "Always"
-          port { container_port = 80 }
-          resources {
-            requests = {
-              cpu    = "50m"
-              memory = "64Mi"
-            }
-            limits = {
-              cpu    = "200m"
-              memory = "128Mi"
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-resource "kubernetes_service_v1" "client_web_svc" {
-  metadata {
-    name      = "stockops-client-web-svc"
-    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
-  }
-  spec {
-    selector = { app = "stockops-client-web" }
-    port {
-      port        = 80
-      target_port = 80
-    }
-    type = "ClusterIP"
-  }
-}
-
-# --------------------------------------------------------------------------
-# admin-web (관리자 웹, Port 80)
-# --------------------------------------------------------------------------
-
-resource "kubernetes_deployment_v1" "admin_web" {
-  wait_for_rollout = false
-  metadata {
-    name      = "stockops-admin-web"
-    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
-    labels    = { app = "stockops-admin-web" }
-  }
-  spec {
-    replicas = 1
-    selector { match_labels = { app = "stockops-admin-web" } }
-    template {
-      metadata { labels = { app = "stockops-admin-web" } }
-      spec {
-        container {
-          name              = "admin-web-container"
-          image             = "448768137813.dkr.ecr.us-east-2.amazonaws.com/stockops-admin-web:latest"
-          image_pull_policy = "Always"
-          port { container_port = 80 }
-          resources {
-            requests = {
-              cpu    = "50m"
-              memory = "64Mi"
-            }
-            limits = {
-              cpu    = "200m"
-              memory = "128Mi"
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-resource "kubernetes_service_v1" "admin_web_svc" {
-  metadata {
-    name      = "stockops-admin-web-svc"
-    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
-  }
-  spec {
-    selector = { app = "stockops-admin-web" }
-    port {
-      port        = 80
-      target_port = 80
-    }
-    type = "ClusterIP"
-  }
 }
 
 # --------------------------------------------------------------------------
@@ -208,7 +107,7 @@ resource "kubernetes_deployment_v1" "api_server" {
           }
           env {
             name  = "SPRING_PROFILES_ACTIVE"
-            value = "dev"
+            value = "prod"
           }
           env {
             name  = "STOCKOPS_DATASOURCE_URL"
@@ -271,7 +170,7 @@ resource "kubernetes_deployment_v1" "api_server" {
           }
           env {
             name  = "STOCKOPS_CORS_ALLOWED_ORIGINS"
-            value = "https://mellohn.cloud,https://admin.mellohn.cloud"
+            value = "https://app.siseon.live,https://siseon.live"
           }
         }
       }
@@ -400,35 +299,7 @@ resource "kubernetes_service_v1" "redis_svc" {
 
 # --------------------------------------------------------------------------
 # TargetGroupBinding — ALB Target Group ↔ K8s Service 연결
-# --------------------------------------------------------------------------
-
-resource "kubectl_manifest" "client_tgb" {
-  yaml_body = yamlencode({
-    apiVersion = "elbv2.k8s.aws/v1beta1"
-    kind       = "TargetGroupBinding"
-    metadata   = { name = "stockops-client-tgb", namespace = kubernetes_namespace_v1.stockops.metadata[0].name }
-    spec = {
-      targetType     = "ip"
-      serviceRef     = { name = kubernetes_service_v1.client_web_svc.metadata[0].name, port = 80 }
-      targetGroupARN = module.ohio_alb.frontend_tg_arn
-    }
-  })
-  depends_on = [helm_release.aws_load_balancer_controller]
-}
-
-resource "kubectl_manifest" "admin_tgb" {
-  yaml_body = yamlencode({
-    apiVersion = "elbv2.k8s.aws/v1beta1"
-    kind       = "TargetGroupBinding"
-    metadata   = { name = "stockops-admin-tgb", namespace = kubernetes_namespace_v1.stockops.metadata[0].name }
-    spec = {
-      targetType     = "ip"
-      serviceRef     = { name = kubernetes_service_v1.admin_web_svc.metadata[0].name, port = 80 }
-      targetGroupARN = module.ohio_alb.admin_tg_arn
-    }
-  })
-  depends_on = [helm_release.aws_load_balancer_controller]
-}
+# --------------------------------------------------------------------------  
 
 resource "kubectl_manifest" "api_tgb" {
   yaml_body = yamlencode({

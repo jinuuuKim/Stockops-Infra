@@ -17,16 +17,6 @@ output "alb_sg_id" {
   value       = aws_security_group.alb_sg.id
 }
 
-output "frontend_tg_arn" {
-  description = "client-web 타겟 그룹 ARN"
-  value       = aws_lb_target_group.frontend_tg.arn
-}
-
-output "admin_tg_arn" {
-  description = "admin-web 타겟 그룹 ARN"
-  value       = aws_lb_target_group.admin_tg.arn
-}
-
 output "spring_tg_arn" {
   description = "api-server (Spring Boot) 타겟 그룹 ARN"
   value       = aws_lb_target_group.spring_tg.arn

@@ -27,11 +27,6 @@ variable "db_sg_id" {
   type        = string
 }
 
-variable "frontend_tg_arn" {
-  description = "client-web ALB 타겟 그룹 ARN"
-  type        = string
-}
-
 variable "spring_tg_arn" {
   description = "api-server ALB 타겟 그룹 ARN"
   type        = string

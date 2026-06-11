@@ -108,112 +108,6 @@ resource "kubernetes_config_map_v1_data" "aws_auth" {
 }
 
 # --------------------------------------------------------------------------
-# client-web (사용자 포털, Port 80)
-# --------------------------------------------------------------------------
-
-resource "kubernetes_deployment_v1" "client_web" {
-  wait_for_rollout = false
-  metadata {
-    name      = "stockops-client-web"
-    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
-    labels    = { app = "stockops-client-web" }
-  }
-  spec {
-    replicas = 1
-    selector { match_labels = { app = "stockops-client-web" } }
-    template {
-      metadata { labels = { app = "stockops-client-web" } }
-      spec {
-        container {
-          name              = "client-web-container"
-          image             = "${module.seoul_ecr["stockops-client-web"].repository_url}:latest"
-          image_pull_policy = "Always"
-          port { container_port = 80 }
-          resources {
-            requests = {
-              cpu    = "50m"
-              memory = "64Mi"
-            }
-            limits = {
-              cpu    = "200m"
-              memory = "128Mi"
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-resource "kubernetes_service_v1" "client_web_svc" {
-  metadata {
-    name      = "stockops-client-web-svc"
-    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
-  }
-  spec {
-    selector = { app = "stockops-client-web" }
-    port {
-      port        = 80
-      target_port = 80
-    }
-    type = "ClusterIP"
-  }
-}
-
-# --------------------------------------------------------------------------
-# admin-web (관리자 웹, Port 80)
-# --------------------------------------------------------------------------
-
-resource "kubernetes_deployment_v1" "admin_web" {
-  wait_for_rollout = false
-  metadata {
-    name      = "stockops-admin-web"
-    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
-    labels    = { app = "stockops-admin-web" }
-  }
-  spec {
-    replicas = 1
-    selector { match_labels = { app = "stockops-admin-web" } }
-    template {
-      metadata { labels = { app = "stockops-admin-web" } }
-      spec {
-        container {
-          name              = "admin-web-container"
-          image             = "${module.seoul_ecr["stockops-admin-web"].repository_url}:latest"
-          image_pull_policy = "Always"
-          port { container_port = 80 }
-          resources {
-            requests = {
-              cpu    = "50m"
-              memory = "64Mi"
-            }
-            limits = {
-              cpu    = "200m"
-              memory = "128Mi"
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-resource "kubernetes_service_v1" "admin_web_svc" {
-  metadata {
-    name      = "stockops-admin-web-svc"
-    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
-  }
-  spec {
-    selector = { app = "stockops-admin-web" }
-    port {
-      port        = 80
-      target_port = 80
-    }
-    type = "ClusterIP"
-  }
-}
-
-# --------------------------------------------------------------------------
 # api-server (Spring Boot 백엔드, Port 8080)
 # --------------------------------------------------------------------------
 
@@ -247,7 +141,7 @@ resource "kubernetes_deployment_v1" "api_server" {
           }
           env {
             name  = "SPRING_PROFILES_ACTIVE"
-            value = "dev"
+            value = "prod"
           }
           env {
             name  = "STOCKOPS_DATASOURCE_URL"
@@ -308,6 +202,14 @@ resource "kubernetes_deployment_v1" "api_server" {
             name  = "MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS"
             value = "always"
           }
+          env {
+            name  = "STOCKOPS_CORS_ALLOWED_ORIGINS"
+            value = "https://app.siseon.live,https://siseon.live"
+          }
+          env {   
+            name  = "STOCKOPS_OTLP_TRACING_ENDPOINT"
+            value = "http://adot-collector-opentelemetry-collector.opentelemetry:4318/v1/traces" 
+          }
         }
       }
     }
@@ -318,10 +220,12 @@ resource "kubernetes_service_v1" "api_server_svc" {
   metadata {
     name      = "stockops-api-svc"
     namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+    labels    = { app = "stockops-api" }
   }
   spec {
     selector = { app = "stockops-api" }
     port {
+      name        = "http"
       port        = 8080
       target_port = 8080
     }
@@ -361,6 +265,10 @@ resource "kubernetes_deployment_v1" "ai_module" {
               memory = "1Gi"
             }
           }
+          env {   
+            name  = "OTEL_EXPORTER_OTLP_ENDPOINT"
+            value = "http://adot-collector-opentelemetry-collector.opentelemetry:4318"
+          }
         }
       }
     }
@@ -371,10 +279,12 @@ resource "kubernetes_service_v1" "ai_module_svc" {
   metadata {
     name      = "stockops-ai-svc"
     namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+    labels    = { app = "stockops-ai" }
   }
   spec {
     selector = { app = "stockops-ai" }
     port {
+      name        = "http"
       port        = 8000
       target_port = 8000
     }
@@ -437,34 +347,6 @@ resource "kubernetes_service_v1" "redis_svc" {
 # TargetGroupBinding — ALB Target Group ↔ K8s Service 연결
 # targetType: ip 은 immutable, 변경 시 삭제 후 재생성 필요
 # --------------------------------------------------------------------------
-
-resource "kubectl_manifest" "client_tgb" {
-  yaml_body = yamlencode({
-    apiVersion = "elbv2.k8s.aws/v1beta1"
-    kind       = "TargetGroupBinding"
-    metadata   = { name = "stockops-client-tgb", namespace = kubernetes_namespace_v1.stockops.metadata[0].name }
-    spec = {
-      targetType     = "ip"
-      serviceRef     = { name = kubernetes_service_v1.client_web_svc.metadata[0].name, port = 80 }
-      targetGroupARN = module.seoul_alb.frontend_tg_arn
-    }
-  })
-  depends_on = [helm_release.aws_load_balancer_controller]
-}
-
-resource "kubectl_manifest" "admin_tgb" {
-  yaml_body = yamlencode({
-    apiVersion = "elbv2.k8s.aws/v1beta1"
-    kind       = "TargetGroupBinding"
-    metadata   = { name = "stockops-admin-tgb", namespace = kubernetes_namespace_v1.stockops.metadata[0].name }
-    spec = {
-      targetType     = "ip"
-      serviceRef     = { name = kubernetes_service_v1.admin_web_svc.metadata[0].name, port = 80 }
-      targetGroupARN = module.seoul_alb.admin_tg_arn
-    }
-  })
-  depends_on = [helm_release.aws_load_balancer_controller]
-}
 
 resource "kubectl_manifest" "api_tgb" {
   yaml_body = yamlencode({

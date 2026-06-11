@@ -105,3 +105,49 @@ resource "aws_iam_role_policy" "eks_deploy" {
   role   = aws_iam_role.github_actions.id
   policy = data.aws_iam_policy_document.eks_deploy.json
 }
+
+# S3 정적 배포 권한 (프론트 s3 sync --delete)
+data "aws_iam_policy_document" "s3_deploy" {
+  statement {
+    sid       = "S3ListFrontendBuckets"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [for b in var.frontend_bucket_names : "arn:aws:s3:::${b}"]
+  }
+  statement {
+    sid    = "S3WriteFrontendObjects"
+    effect = "Allow"
+    actions = [
+      "s3:PutObject",
+      "s3:DeleteObject",
+      "s3:GetObject",
+    ]
+    resources = [for b in var.frontend_bucket_names : "arn:aws:s3:::${b}/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "s3_deploy" {
+  name   = "s3-frontend-deploy-policy"
+  role   = aws_iam_role.github_actions.id
+  policy = data.aws_iam_policy_document.s3_deploy.json
+}
+
+# CloudFront 캐시 무효화 권한
+data "aws_iam_policy_document" "cloudfront_invalidate" {
+  statement {
+    sid    = "CloudFrontInvalidate"
+    effect = "Allow"
+    actions = [
+      "cloudfront:ListDistributions",
+      "cloudfront:CreateInvalidation",
+      "cloudfront:GetInvalidation",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "cloudfront_invalidate" {
+  name   = "cloudfront-invalidate-policy"
+  role   = aws_iam_role.github_actions.id
+  policy = data.aws_iam_policy_document.cloudfront_invalidate.json
+}
