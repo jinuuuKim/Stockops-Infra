@@ -66,25 +66,25 @@ StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS
    ┌─────────┴──────────┐              ┌───────────┴─────────┐
    │정적                 │동적          │동적                  │정적
    ▼                    ▼              ▼                     ▼
- siseon.live /      api.siseon.live                       (동일)
- app.siseon.live          │
-   │                      ▼
-   ▼              Global Accelerator
- CloudFront      (지연 라우팅 + 페일오버, 진짜 클라이언트 IP 인식)
- (OAC, 엣지캐시)        │        │
-   │            ┌───────┘        └────────┐
-   ▼            ▼                          ▼
-  S3        서울 ALB                   오하이오 ALB
-(정적자산)   (HTTPS 443)               (HTTPS 443)
-          /api /ws → spring          /api /ws → spring
-          /ai      → fastapi         /ai      → fastapi
-          default  → 404(fixed)      default  → 404(fixed)
-               │                          │
-           서울 EKS                   오하이오 EKS
-        (api / ai / redis)          (api / ai / redis)
-               │                          │
-        서울 RDS (Master) ──────────→ 오하이오 RDS (Read Replica)
-        읽기/쓰기                      읽기 / 쓰기는 서울로
+ siseon.live /           api.siseon.live                   (동일)
+ app.siseon.live                │
+   │                            ▼
+   ▼                   Global Accelerator
+ CloudFront   (지연 라우팅 + 페일오버, 진짜 클라이언트 IP 인식)
+ (OAC, 엣지캐시)          │        │
+   │             ┌───────┘        └────────┐
+   ▼             ▼                          ▼
+  S3         서울 ALB                   오하이오 ALB
+(정적자산)    (HTTPS 443)               (HTTPS 443)
+           /api /ws → spring          /api /ws → spring
+           /ai      → fastapi         /ai      → fastapi
+           default  → 404(fixed)      default  → 404(fixed)
+                │                          │
+            서울 EKS                   오하이오 EKS
+         (api / ai / redis)          (api / ai / redis)
+                │                          │
+         서울 RDS (Master) ──────────→ 오하이오 RDS (Read Replica)
+         읽기/쓰기                      읽기 / 쓰기는 서울로
 ```
 
 - **정적(`siseon.live`, `app.siseon.live`)**: CloudFront → S3(OAC). API behavior 없음(순수 정적). SPA 라우팅은 403/404 → `index.html` 폴백.
