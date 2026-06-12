@@ -210,6 +210,10 @@ resource "kubernetes_deployment_v1" "api_server" {
             name  = "STOCKOPS_OTLP_TRACING_ENDPOINT"
             value = "http://adot-collector-opentelemetry-collector.opentelemetry:4318/v1/traces" 
           }
+          env {   
+            name  = "STOCKOPS_AI_SERVICE_URL"
+            value = "http://stockops-ai-svc.stockops:8000"
+          }
         }
       }
     }
@@ -268,6 +272,28 @@ resource "kubernetes_deployment_v1" "ai_module" {
           env {   
             name  = "OTEL_EXPORTER_OTLP_ENDPOINT"
             value = "http://adot-collector-opentelemetry-collector.opentelemetry:4318"
+          }
+          env {
+            name = "DB_USERNAME"
+            value_from {
+              secret_key_ref {
+                name = "stockops-secret"
+                key  = "DB_USERNAME"
+              }
+            }
+          }
+          env {
+            name = "DB_PASSWORD"
+            value_from {
+              secret_key_ref {
+                name = "stockops-secret"
+                key  = "DB_PASSWORD"
+              }
+            }
+          }
+          env {
+            name  = "DATABASE_URL"
+            value = "postgresql://$(DB_USERNAME):$(DB_PASSWORD)@seoul-rds-postgres.cnas28mgerfu.ap-northeast-2.rds.amazonaws.com:5432/stockops"
           }
         }
       }
