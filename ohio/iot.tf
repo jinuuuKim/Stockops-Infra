@@ -5,6 +5,48 @@
 # ==========================================================================
 
 # --------------------------------------------------------------------------
+# IoT Thing + 정책 + 인증서 연결 (서울과 동일 구조, us-east-2 인증서)
+# 페일오버 시 디바이스가 오하이오 IoT Core에 연결하기 위해 필요
+# --------------------------------------------------------------------------
+resource "aws_iot_thing" "bridge" {
+  provider = aws.ohio
+  name     = "mosquitto-bridge"
+}
+
+resource "aws_iot_policy" "bridge" {
+  provider = aws.ohio
+  name     = "mosquitto-bridge-policy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "iot:Connect"
+        Resource = "arn:aws:iot:us-east-2:${data.aws_caller_identity.current.account_id}:client/mosquitto-bridge"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "iot:Publish"
+        Resource = "arn:aws:iot:us-east-2:${data.aws_caller_identity.current.account_id}:topic/sensimul/sites/*"
+      },
+    ]
+  })
+}
+
+resource "aws_iot_thing_principal_attachment" "bridge" {
+  provider  = aws.ohio
+  thing     = aws_iot_thing.bridge.name
+  principal = "arn:aws:iot:us-east-2:448768137813:cert/d3e9b7f10ce8281a093eb2da02d09b759a31aa13d0a2ff9f27480a2f64d1e098"
+}
+
+resource "aws_iot_policy_attachment" "bridge" {
+  provider = aws.ohio
+  policy   = aws_iot_policy.bridge.name
+  target   = "arn:aws:iot:us-east-2:448768137813:cert/d3e9b7f10ce8281a093eb2da02d09b759a31aa13d0a2ff9f27480a2f64d1e098"
+}
+
+# --------------------------------------------------------------------------
 # SQS — 실시간 처리
 # --------------------------------------------------------------------------
 resource "aws_sqs_queue" "sensor_dlq" {
@@ -97,7 +139,7 @@ resource "aws_iot_topic_rule" "sensor_fanout" {
   provider    = aws.ohio
   name        = "stockops_sensor_fanout"
   description = "센서 데이터 SQS 팬아웃 (페일오버 전용)"
-  enabled     = false   # 페일오버 시 true로 변경
+  enabled     = true
   sql         = "SELECT *, topic() as mqtt_topic FROM 'sensimul/sites/+/sensors/+'"
   sql_version = "2016-03-23"
 

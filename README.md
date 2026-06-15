@@ -259,6 +259,13 @@ terraform apply -auto-approve
 > Cross-Region Replica(오하이오 RDS) 생성에 약 25분. ACM 검증은 NS 전파 후 자동 완료(5~15분).
 
 ### 애플리케이션 배포 (GitHub Actions)
+```
+cd C:\KJW\combined-repo
+git submodule update --remote --merge
+git add .
+git commit -m "Sync submodules to latest"
+git push
+```
 
 ```powershell
 gh workflow run deploy.yml

@@ -24,6 +24,7 @@ module "seoul_alb" {
   public_subnet_ids   = module.seoul_vpc.public_subnet_ids
   acm_certificate_arn = aws_acm_certificate_validation.seoul.certificate_arn
   domain              = var.domain
+  enable_waf = true
 }
 
 module "seoul_eks" {

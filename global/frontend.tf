@@ -67,6 +67,7 @@ resource "aws_cloudfront_distribution" "client" {
   aliases             = [var.domain]
   price_class         = "PriceClass_200" # 아시아 + 미국 + 유럽 (한국/미국 커버, 비용 절감)
   comment             = "siseon client-web static"
+  web_acl_id          = aws_wafv2_web_acl.cloudfront.arn
 
   origin {
     domain_name              = data.aws_s3_bucket.client.bucket_regional_domain_name
@@ -122,6 +123,7 @@ resource "aws_cloudfront_distribution" "admin" {
   aliases             = ["app.${var.domain}"]
   price_class         = "PriceClass_200"
   comment             = "siseon admin-web static"
+  web_acl_id          = aws_wafv2_web_acl.cloudfront.arn
 
   origin {
     domain_name              = data.aws_s3_bucket.admin.bucket_regional_domain_name

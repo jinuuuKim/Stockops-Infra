@@ -24,6 +24,7 @@ module "ohio_alb" {
   public_subnet_ids   = module.ohio_vpc.public_subnet_ids
   acm_certificate_arn = aws_acm_certificate_validation.ohio.certificate_arn
   domain              = var.domain
+  enable_waf = true
 }
 
 module "ohio_eks" {

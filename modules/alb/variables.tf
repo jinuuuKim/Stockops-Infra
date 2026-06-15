@@ -27,3 +27,15 @@ variable "domain" {
   type    = string
   default = "siseon.live"
 }
+
+variable "enable_waf" {
+  description = "이 ALB에 REGIONAL WAFv2 WebACL 연결 여부"
+  type        = bool
+  default     = false
+}
+
+variable "waf_rate_limit" {
+  description = "RateLimit 룰 임계값 (5분당 IP별 요청 수)"
+  type        = number
+  default     = 2000
+}

@@ -12,15 +12,15 @@ data "terraform_remote_state" "seoul" {
   }
 }
 
-# data "terraform_remote_state" "ohio" {
-#   backend = "s3"
-#   config = {
-#     bucket  = "siseon-terraform-state"
-#     key     = "infra/ohio/terraform.tfstate"
-#     region  = "ap-northeast-2"
-#     profile = "siseon"
-#   }
-# }
+data "terraform_remote_state" "ohio" {
+  backend = "s3"
+  config = {
+    bucket  = "siseon-terraform-state"
+    key     = "infra/ohio/terraform.tfstate"
+    region  = "ap-northeast-2"
+    profile = "siseon"
+  }
+}
 
 resource "aws_globalaccelerator_accelerator" "stockops" {
   name            = "stockops-global-accelerator"
@@ -80,32 +80,32 @@ resource "aws_globalaccelerator_endpoint_group" "seoul_https" {
   }
 }
 
-# resource "aws_globalaccelerator_endpoint_group" "ohio_http" {
-#   listener_arn                  = aws_globalaccelerator_listener.http.id
-#   endpoint_group_region         = "us-east-2"
-#   traffic_dial_percentage       = 100
-#   health_check_path             = "/"
-#   health_check_protocol         = "HTTP"
-#   health_check_interval_seconds = 30
-#   threshold_count               = 3
-#   endpoint_configuration {
-#     endpoint_id                    = data.terraform_remote_state.ohio.outputs.ohio_alb_arn
-#     weight                         = 100
-#     client_ip_preservation_enabled = true
-#   }
-# }
+resource "aws_globalaccelerator_endpoint_group" "ohio_http" {
+  listener_arn                  = aws_globalaccelerator_listener.http.id
+  endpoint_group_region         = "us-east-2"
+  traffic_dial_percentage       = 100
+  health_check_path             = "/"
+  health_check_protocol         = "HTTP"
+  health_check_interval_seconds = 30
+  threshold_count               = 3
+  endpoint_configuration {
+    endpoint_id                    = data.terraform_remote_state.ohio.outputs.ohio_alb_arn
+    weight                         = 100
+    client_ip_preservation_enabled = true
+  }
+}
 
-# resource "aws_globalaccelerator_endpoint_group" "ohio_https" {
-#   listener_arn                  = aws_globalaccelerator_listener.https.id
-#   endpoint_group_region         = "us-east-2"
-#   traffic_dial_percentage       = 100
-#   health_check_path             = "/"
-#   health_check_protocol         = "HTTPS"
-#   health_check_interval_seconds = 30
-#   threshold_count               = 3
-#   endpoint_configuration {
-#     endpoint_id                    = data.terraform_remote_state.ohio.outputs.ohio_alb_arn
-#     weight                         = 100
-#     client_ip_preservation_enabled = true
-#   }
-# }
+resource "aws_globalaccelerator_endpoint_group" "ohio_https" {
+  listener_arn                  = aws_globalaccelerator_listener.https.id
+  endpoint_group_region         = "us-east-2"
+  traffic_dial_percentage       = 100
+  health_check_path             = "/"
+  health_check_protocol         = "HTTPS"
+  health_check_interval_seconds = 30
+  threshold_count               = 3
+  endpoint_configuration {
+    endpoint_id                    = data.terraform_remote_state.ohio.outputs.ohio_alb_arn
+    weight                         = 100
+    client_ip_preservation_enabled = true
+  }
+}
