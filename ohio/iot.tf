@@ -16,14 +16,13 @@ resource "aws_iot_thing" "bridge" {
 resource "aws_iot_policy" "bridge" {
   provider = aws.ohio
   name     = "mosquitto-bridge-policy"
-
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
         Effect   = "Allow"
         Action   = "iot:Connect"
-        Resource = "arn:aws:iot:us-east-2:${data.aws_caller_identity.current.account_id}:client/mosquitto-bridge"
+        Resource = "arn:aws:iot:us-east-2:${data.aws_caller_identity.current.account_id}:client/mosquitto-bridge-ohio"
       },
       {
         Effect   = "Allow"
@@ -156,4 +155,47 @@ resource "aws_iot_topic_rule" "sensor_fanout" {
       use_base64 = false
     }
   }
+}
+
+data "aws_iam_policy_document" "api_sqs_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [module.ohio_eks.oidc_provider_arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${module.ohio_eks.oidc_provider}:sub"
+      values   = ["system:serviceaccount:stockops:stockops-api-sa"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${module.ohio_eks.oidc_provider}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "api_sqs" {
+  name               = "stockops-api-sqs-role-ohio"   # 서울과 이름 충돌 방지
+  assume_role_policy = data.aws_iam_policy_document.api_sqs_assume.json
+}
+
+resource "aws_iam_role_policy" "api_sqs" {
+  name = "stockops-api-sqs-consume"
+  role = aws_iam_role.api_sqs.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes",
+        "sqs:ChangeMessageVisibility",
+      ]
+      Resource = aws_sqs_queue.sensor_data.arn   # ← 오하이오 자기 큐
+    }]
+  })
 }

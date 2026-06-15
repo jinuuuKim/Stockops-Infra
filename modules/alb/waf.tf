@@ -180,3 +180,15 @@ resource "aws_wafv2_web_acl_association" "this" {
   resource_arn = aws_lb.alb.arn
   web_acl_arn  = aws_wafv2_web_acl.this[0].arn
 }
+
+resource "aws_cloudwatch_log_group" "waf" {
+  count             = var.enable_waf ? 1 : 0
+  name              = "aws-waf-logs-stockops-alb-${var.region_name}"
+  retention_in_days = 7
+}
+ 
+resource "aws_wafv2_web_acl_logging_configuration" "this" {
+  count                   = var.enable_waf ? 1 : 0
+  resource_arn            = aws_wafv2_web_acl.this[0].arn
+  log_destination_configs = [aws_cloudwatch_log_group.waf[0].arn]
+}

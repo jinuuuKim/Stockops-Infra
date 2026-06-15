@@ -90,6 +90,7 @@ resource "kubernetes_deployment_v1" "api_server" {
     template {
       metadata { labels = { app = "stockops-api" } }
       spec {
+        service_account_name = kubernetes_service_account_v1.api.metadata[0].name
         container {
           name              = "api-container"
           image             = "448768137813.dkr.ecr.us-east-2.amazonaws.com/stockops-api:latest"
@@ -172,6 +173,22 @@ resource "kubernetes_deployment_v1" "api_server" {
             name  = "STOCKOPS_CORS_ALLOWED_ORIGINS"
             value = "https://app.siseon.live,https://siseon.live"
           }
+          env {
+            name  = "STOCKOPS_SQS_INGESTION_ENABLED"
+            value = "true"
+          }
+          env {
+            name  = "STOCKOPS_SQS_INGESTION_QUEUE_URL"
+            value = aws_sqs_queue.sensor_data.url
+          }
+          env {
+            name  = "STOCKOPS_SQS_INGESTION_REGION"
+            value = "us-east-2"                        # ← 필수. 빠지면 ap-northeast-2로 빌드돼 실패
+          }
+          env {
+            name  = "STOCKOPS_MQTT_INGESTION_ENABLED"
+            value = "false"
+          }
         }
       }
     }
@@ -190,6 +207,16 @@ resource "kubernetes_service_v1" "api_server_svc" {
       target_port = 8080
     }
     type = "ClusterIP"
+  }
+}
+
+resource "kubernetes_service_account_v1" "api" {
+  metadata {
+    name      = "stockops-api-sa"
+    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+    annotations = {
+      "eks.amazonaws.com/role-arn" = aws_iam_role.api_sqs.arn
+    }
   }
 }
 

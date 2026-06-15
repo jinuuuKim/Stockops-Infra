@@ -65,3 +65,15 @@ resource "aws_wafv2_web_acl" "cloudfront" {
     sampled_requests_enabled   = true
   }
 }
+
+resource "aws_cloudwatch_log_group" "waf_cloudfront" {
+  provider          = aws.virginia
+  name              = "aws-waf-logs-stockops-cloudfront"
+  retention_in_days = 7
+}
+ 
+resource "aws_wafv2_web_acl_logging_configuration" "cloudfront" {
+  provider                = aws.virginia
+  resource_arn            = aws_wafv2_web_acl.cloudfront.arn
+  log_destination_configs = [aws_cloudwatch_log_group.waf_cloudfront.arn]
+}

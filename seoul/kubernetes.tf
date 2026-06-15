@@ -100,6 +100,12 @@ resource "kubernetes_config_map_v1_data" "aws_auth" {
         rolearn  = "arn:aws:iam::448768137813:role/${module.seoul_karpenter.node_role_name}"
         username = "system:node:{{EC2PrivateDNSName}}"
         groups   = ["system:bootstrappers", "system:nodes"]
+      },
+      # 팀원 SSO 권한셋 (jw.kim, hs.lee 등 4명 공통) — kubectl/ArgoCD 작업용
+      {
+        rolearn  = "arn:aws:iam::448768137813:role/aws-reserved/sso.amazonaws.com/ap-northeast-2/AWSReservedSSO_AdministratorAccess_1f4973541f6585d7"
+        username = "sso-user:{{SessionName}}"
+        groups   = ["system:masters"]
       }
     ])
   }
@@ -124,6 +130,7 @@ resource "kubernetes_deployment_v1" "api_server" {
     template {
       metadata { labels = { app = "stockops-api" } }
       spec {
+        service_account_name = kubernetes_service_account_v1.api.metadata[0].name
         container {
           name              = "api-container"
           image             = "${module.seoul_ecr["stockops-api"].repository_url}:latest"
@@ -214,6 +221,28 @@ resource "kubernetes_deployment_v1" "api_server" {
             name  = "STOCKOPS_AI_SERVICE_URL"
             value = "http://stockops-ai-svc.stockops:8000"
           }
+          env {
+            name  = "STOCKOPS_ACTUATOR_PROMETHEUS_PUBLIC"
+            value = "true"
+          }
+          env {
+            name  = "STOCKOPS_SQS_INGESTION_ENABLED"
+            value = "true"
+          }
+          env {
+            name  = "STOCKOPS_SQS_INGESTION_QUEUE_URL"
+            value = module.seoul_iot.sqs_queue_url
+          }
+          env {
+            name  = "STOCKOPS_SQS_INGESTION_REGION"
+            value = "ap-northeast-2"
+          }
+          # (선택) 클라우드 백엔드는 IoT Core→SQS 경로만 쓰므로 직접 MQTT 수신은 끔.
+          # 안 끄면 tcp://localhost:1883 재연결 시도 로그가 계속 쌓임(파드는 안 죽음, degraded mode).
+          env {
+            name  = "STOCKOPS_MQTT_INGESTION_ENABLED"
+            value = "false"
+          }
         }
       }
     }
@@ -234,6 +263,16 @@ resource "kubernetes_service_v1" "api_server_svc" {
       target_port = 8080
     }
     type = "ClusterIP"
+  }
+}
+
+resource "kubernetes_service_account_v1" "api" {
+  metadata {
+    name      = "stockops-api-sa"
+    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
+    annotations = {
+      "eks.amazonaws.com/role-arn" = aws_iam_role.api_sqs.arn
+    }
   }
 }
 

@@ -36,3 +36,9 @@ variable "iot_certificate_arn" {
   description = "IoT 인증서 ARN (콘솔에서 발급, destroy 후에도 유지)"
   type        = string
 }
+
+variable "client_id" {
+  description = "MQTT client_id (Connect 권한 ARN에 사용, 리전별로 고유해야 함)"
+  type        = string
+  default     = "mosquitto-bridge"
+}

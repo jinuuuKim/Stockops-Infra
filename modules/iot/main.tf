@@ -23,7 +23,7 @@ resource "aws_iot_policy" "bridge" {
       {
         Effect   = "Allow"
         Action   = "iot:Connect"
-        Resource = "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:client/${var.thing_name}"
+        Resource = "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:client/${var.client_id}"
       },
       {
         Effect   = "Allow"
