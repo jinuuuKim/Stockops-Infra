@@ -3,6 +3,18 @@
 # 흐름: Secrets Manager → ESO → K8s Secret (stockops-secret) 자동 생성
 # ==========================================================================
 
+resource "random_password" "jwt" {
+  length           = 64
+  special          = true
+  override_special = "!#%*-_=+"   # env 주입에 안전한 문자만
+}
+
+resource "random_password" "db" {
+  length           = 32
+  special          = true
+  override_special = "!#%*-_=+"
+}
+
 resource "aws_secretsmanager_secret" "stockops" {
   name                    = "stockops/app"
   recovery_window_in_days = 0
@@ -11,9 +23,9 @@ resource "aws_secretsmanager_secret" "stockops" {
 resource "aws_secretsmanager_secret_version" "stockops" {
   secret_id = aws_secretsmanager_secret.stockops.id
   secret_string = jsonencode({
-    JWT_SECRET  = var.jwt_secret
-    DB_USERNAME = var.db_username
-    DB_PASSWORD = var.db_password
+    JWT_SECRET  = random_password.jwt.result
+    DB_USERNAME = "stockops"
+    DB_PASSWORD = random_password.db.result
   })
 }
 

@@ -382,7 +382,7 @@ resource "kubectl_manifest" "secret_store" {
       provider = {
         aws = {
           service = "SecretsManager"
-          region  = "us-east-2"
+          region  = "ap-northeast-2"
           auth = {
             jwt = {
               serviceAccountRef = {
@@ -418,7 +418,7 @@ resource "kubectl_manifest" "external_secret" {
       }
       dataFrom = [{
         extract = {
-          key = "stockops/app"
+          key = data.terraform_remote_state.seoul.outputs.stockops_secret_arn
         }
       }]
     }

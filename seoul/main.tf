@@ -60,8 +60,8 @@ module "seoul_db" {
   region_name        = "seoul"
   priv_db_subnet_ids = module.seoul_vpc.priv_db_subnet_ids
   db_sg_id           = aws_security_group.seoul_db_sg.id
-  db_username        = var.db_username
-  db_password        = var.db_password
+  db_username        = "dbadmin"
+  db_password        = random_password.db.result
 }
 
 module "seoul_ecr" {

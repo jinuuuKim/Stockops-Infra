@@ -493,9 +493,7 @@ resource "kubectl_manifest" "external_secret" {
         creationPolicy = "Owner"
       }
       dataFrom = [{
-        extract = {
-          key = "stockops/app"
-        }
+        extract = { key = "stockops/app" }
       }]
     }
   })

@@ -36,3 +36,8 @@ output "sensor_sqs_queue_url" {
   description = "IoT 센서 데이터 SQS 큐 URL"
   value       = module.seoul_iot.sqs_queue_url
 }
+
+output "stockops_secret_arn" {
+  description = "커스텀 시크릿(JWT) ARN — ohio cross-region 참조용"
+  value       = aws_secretsmanager_secret.stockops.arn
+}

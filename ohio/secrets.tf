@@ -2,20 +2,6 @@
 # 오하이오 리전 — Secrets Manager + ESO IRSA
 # ==========================================================================
 
-resource "aws_secretsmanager_secret" "stockops" {
-  name                    = "stockops/app"
-  recovery_window_in_days = 0
-}
-
-resource "aws_secretsmanager_secret_version" "stockops" {
-  secret_id = aws_secretsmanager_secret.stockops.id
-  secret_string = jsonencode({
-    JWT_SECRET  = var.jwt_secret
-    DB_USERNAME = var.db_username
-    DB_PASSWORD = var.db_password
-  })
-}
-
 data "aws_iam_policy_document" "eso_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -52,7 +38,7 @@ resource "aws_iam_role_policy" "eso" {
         "secretsmanager:GetSecretValue",
         "secretsmanager:DescribeSecret",
       ]
-      Resource = aws_secretsmanager_secret.stockops.arn
+      Resource = data.terraform_remote_state.seoul.outputs.stockops_secret_arn
     }]
   })
 }

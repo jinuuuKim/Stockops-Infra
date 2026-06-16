@@ -8,6 +8,9 @@ terraform {
     key     = "infra/seoul/terraform.tfstate"
     region  = "ap-northeast-2"
     profile = "siseon"
+    encrypt      = true                  # state at-rest 암호화 ON
+    kms_key_id   = "alias/siseon-tfstate" # bootstrap 이 만든 KMS 별칭
+    use_lockfile = true                  # TF 1.10+ S3 네이티브 락
   }
 
   required_providers {

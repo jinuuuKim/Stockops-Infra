@@ -24,7 +24,7 @@ variable "db_username" {
 }
 
 variable "db_password" {
-  description = "PostgreSQL 마스터 비밀번호"
+  description = "RDS PostgreSQL 마스터 비밀번호"
   type        = string
   sensitive   = true
 }
