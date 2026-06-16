@@ -165,15 +165,18 @@ resource "aws_route_table_association" "priv_app_2c" {
   route_table_id = aws_route_table.priv_app_rt.id
 }
 
-# 프라이빗 DB 라우팅 테이블 (인터넷 경로 없음, 격리)
 resource "aws_route_table" "priv_db_rt" {
   vpc_id = aws_vpc.this.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.this.id
+  }
 
   tags = {
     Name = "${var.region_name}-priv-db-rt"
   }
 }
-
 resource "aws_route_table_association" "priv_db_2a" {
   subnet_id      = aws_subnet.priv_db_sub_2a.id
   route_table_id = aws_route_table.priv_db_rt.id

@@ -12,3 +12,13 @@ variable "delegation_set_id" {
   type    = string
   default = "N02295603ILJ5HVTJBLTY"
 }
+
+variable "db_password" {
+  type      = string
+  sensitive = true
+}
+
+variable "jwt_secret" {
+  type      = string
+  sensitive = true
+}

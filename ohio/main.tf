@@ -36,8 +36,8 @@ module "ohio_eks" {
   db_sg_id            = aws_security_group.ohio_db_sg.id
   spring_tg_arn       = module.ohio_alb.spring_tg_arn
   fastapi_tg_arn      = module.ohio_alb.fastapi_tg_arn
-  node_desired = 1
-  node_min     = 1
+  node_desired = 2
+  node_min     = 2
   node_max     = 4
 }
 

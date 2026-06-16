@@ -258,12 +258,12 @@ resource "kubectl_manifest" "node_pool" {
             {
               key      = "kubernetes.io/arch"
               operator = "In"
-              values   = ["amd64", "arm64"]
+              values   = ["amd64"]
             },
             {
               key      = "node.kubernetes.io/instance-type"
               operator = "In"
-              values   = ["t3.medium", "t3.large", "t4g.medium", "t4g.large"]
+              values   = ["t3.medium", "t3.large"]
             },
           ]
         }

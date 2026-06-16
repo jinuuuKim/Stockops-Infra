@@ -44,6 +44,25 @@ resource "helm_release" "aws_load_balancer_controller" {
   depends_on = [module.ohio_eks]
 }
 
+resource "helm_release" "argocd" {
+  name             = "argocd"
+  repository       = "https://argoproj.github.io/argo-helm"
+  chart            = "argo-cd"
+  namespace        = "argocd"
+  create_namespace = true
+  version          = "7.7.0"
+
+  set {
+    name  = "server.service.type"
+    value = "ClusterIP"
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "aws eks update-kubeconfig --region us-east-2 --name ohio-cluster --profile siseon && kubectl delete crd applications.argoproj.io applicationsets.argoproj.io appprojects.argoproj.io --ignore-not-found"
+  }
+}
+
 # aws-auth ConfigMap — EKS 노드 Role 등록
 resource "kubernetes_config_map_v1_data" "aws_auth" {
   metadata {
@@ -77,124 +96,6 @@ resource "kubernetes_config_map_v1_data" "aws_auth" {
 # api-server (Spring Boot 백엔드, Port 8080)
 # --------------------------------------------------------------------------
 
-resource "kubernetes_deployment_v1" "api_server" {
-  wait_for_rollout = false
-  metadata {
-    name      = "stockops-api"
-    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
-    labels    = { app = "stockops-api" }
-  }
-  spec {
-    replicas = 1
-    selector { match_labels = { app = "stockops-api" } }
-    template {
-      metadata { labels = { app = "stockops-api" } }
-      spec {
-        service_account_name = kubernetes_service_account_v1.api.metadata[0].name
-        container {
-          name              = "api-container"
-          image             = "448768137813.dkr.ecr.us-east-2.amazonaws.com/stockops-api:latest"
-          image_pull_policy = "Always"
-          port { container_port = 8080 }
-          resources {
-            requests = {
-              cpu    = "250m"
-              memory = "512Mi"
-            }
-            limits = {
-              cpu    = "500m"
-              memory = "1Gi"
-            }
-          }
-          env {
-            name  = "SPRING_PROFILES_ACTIVE"
-            value = "prod"
-          }
-          env {
-            name  = "STOCKOPS_DATASOURCE_URL"
-            value = "jdbc:postgresql://${aws_db_instance.ohio_replica.address}:5432/stockops"
-          }
-          env {
-            name = "STOCKOPS_DATASOURCE_USERNAME"
-            value_from {
-              secret_key_ref {
-                name = "stockops-secret"
-                key  = "DB_USERNAME"
-              }
-            }
-          }
-          env {
-            name = "STOCKOPS_DATASOURCE_PASSWORD"
-            value_from {
-              secret_key_ref {
-                name = "stockops-secret"
-                key  = "DB_PASSWORD"
-              }
-            }
-          }
-          env {
-            name = "JWT_SECRET"
-            value_from {
-              secret_key_ref {
-                name = "stockops-secret"
-                key  = "JWT_SECRET"
-              }
-            }
-          }
-          env {
-            name  = "SPRING_DATA_REDIS_HOST"
-            value = "stockops-redis-svc"
-          }
-          env {
-            name  = "SPRING_DATA_REDIS_PORT"
-            value = "6379"
-          }
-          env {
-            name  = "SPRING_MAIL_HOST"
-            value = "smtp.gmail.com"
-          }
-          env {
-            name  = "SPRING_MAIL_PORT"
-            value = "587"
-          }
-          env {
-            name  = "SPRING_MAIL_USERNAME"
-            value = "admin@stockops.com"
-          }
-          env {
-            name  = "SPRING_MAIL_PASSWORD"
-            value = "admin123"
-          }
-          env {
-            name  = "MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS"
-            value = "always"
-          }
-          env {
-            name  = "STOCKOPS_CORS_ALLOWED_ORIGINS"
-            value = "https://app.siseon.live,https://siseon.live"
-          }
-          env {
-            name  = "STOCKOPS_SQS_INGESTION_ENABLED"
-            value = "true"
-          }
-          env {
-            name  = "STOCKOPS_SQS_INGESTION_QUEUE_URL"
-            value = aws_sqs_queue.sensor_data.url
-          }
-          env {
-            name  = "STOCKOPS_SQS_INGESTION_REGION"
-            value = "us-east-2"                        # ← 필수. 빠지면 ap-northeast-2로 빌드돼 실패
-          }
-          env {
-            name  = "STOCKOPS_MQTT_INGESTION_ENABLED"
-            value = "false"
-          }
-        }
-      }
-    }
-  }
-}
-
 resource "kubernetes_service_v1" "api_server_svc" {
   metadata {
     name      = "stockops-api-svc"
@@ -223,40 +124,6 @@ resource "kubernetes_service_account_v1" "api" {
 # --------------------------------------------------------------------------
 # ai-module (FastAPI AI 분석, Port 8000)
 # --------------------------------------------------------------------------
-
-resource "kubernetes_deployment_v1" "ai_module" {
-  wait_for_rollout = false
-  metadata {
-    name      = "stockops-ai"
-    namespace = kubernetes_namespace_v1.stockops.metadata[0].name
-    labels    = { app = "stockops-ai" }
-  }
-  spec {
-    replicas = 1
-    selector { match_labels = { app = "stockops-ai" } }
-    template {
-      metadata { labels = { app = "stockops-ai" } }
-      spec {
-        container {
-          name              = "ai-container"
-          image             = "448768137813.dkr.ecr.us-east-2.amazonaws.com/stockops-ai:latest"
-          image_pull_policy = "Always"
-          port { container_port = 8000 }
-          resources {
-            requests = {
-              cpu    = "250m"
-              memory = "512Mi"
-            }
-            limits = {
-              cpu    = "500m"
-              memory = "1Gi"
-            }
-          }
-        }
-      }
-    }
-  }
-}
 
 resource "kubernetes_service_v1" "ai_module_svc" {
   metadata {
@@ -417,9 +284,7 @@ resource "kubectl_manifest" "external_secret" {
         creationPolicy = "Owner"
       }
       dataFrom = [{
-        extract = {
-          key = data.terraform_remote_state.seoul.outputs.stockops_secret_arn
-        }
+        extract = { key = "stockops/app" }
       }]
     }
   })
