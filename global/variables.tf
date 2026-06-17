@@ -22,9 +22,3 @@ variable "frontend_bucket_region" {
   type    = string
   default = "ap-northeast-2"
 }
-
-# 테스트 비용 절감 목적으로 오하이오 결합 X
-variable "enable_ohio" {
-  type    = bool
-  default = false
-}
