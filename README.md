@@ -139,8 +139,8 @@ global/dns.tf  → Route53 A 레코드:
 | EKS | seoul-cluster v1.30 | ohio-cluster v1.30 | — |
 | 노드 오토스케일 | Karpenter (replica 2) + HPA | Karpenter (replica 1) + HPA | — |
 | ALB | HTTPS + 경로 라우팅 (api/ws/ai) | 동일 | — |
-| RDS | PostgreSQL 16 (Master) | Read Replica | — |
-| ECR | 2개 리포 (api, ai) | replication 자동 복제 | — |
+| RDS | PostgreSQL 18.4 (Master) | Read Replica | — |
+| ECR | 2개 리포 (api, ai) | 2개 리포 (api, ai) — 리전별 독립 | — |
 | ACM | siseon.live (ALB, ap-northeast-2) | siseon.live (ALB, us-east-2) | siseon.live + *.siseon.live (CloudFront, us-east-1) |
 | IoT Core + SQS + Firehose | ✅ | (SQS/IRSA 준비됨, Rule failover용) | — |
 | Secrets Manager + ESO | ✅ | ✅ | — |
@@ -184,7 +184,7 @@ STOCKOPS_CORS_ALLOWED_ORIGINS = "https://app.siseon.live,https://siseon.live"
     └─ Mosquitto 브리지 (TLS:8883)
          └─ AWS IoT Core (sensimul/sites/+/sensors/+)
               └─ IoT Rule ─┬─→ SQS (실시간: api-server 소비 → Redis 캐시 → 웹 표시 / WebSocket 푸시)
-                           └─→ Kinesis Firehose → S3 (Hive 파티션, Parquet → Athena 분석)
+                           └─→ Kinesis Firehose → S3 (GZIP, 날짜 파티션 year/month/day, 15분 버퍼 → Athena 분석)
 ```
 
 - IoT Thing: `mosquitto-bridge` / 서울 엔드포인트: `a2ie1b3xp2emgi-ats.iot.ap-northeast-2.amazonaws.com`
@@ -262,15 +262,14 @@ GitHub Actions (CI) — main push / workflow_dispatch
 │         └─ aws s3 sync --delete  →  CloudFront create-invalidation
 │
 └─ [동적] api-server / ai-module
-     └─ 이미지 빌드  →  서울 ECR push (OIDC, 액세스 키 없음)
-          └─ 서울 ECR → 오하이오 ECR 자동 replication (CRR)
+     └─ 이미지 빌드  →  서울 ECR + 오하이오 ECR 각각 직접 push (OIDC, 액세스 키 없음 / Option B)
                └─ kubectl rollout restart (EKS 재배포; 서울 자동 + 오하이오 스텝)
 
 ArgoCD (CD) — v7.7.0 설치 완료, 앱 구성 예정 (허브-스포크: 서울 ArgoCD 가 서울+오하이오 관리)
 ```
 
 > GitHub Actions Role(OIDC, `github-actions-ecr-push`)은 각 EKS `aws-auth` ConfigMap 에 등록되어 있어야 `kubectl rollout restart` 가 동작(Terraform 관리). 오하이오 롤아웃을 쓰려면 오하이오 `aws-auth` 에도 동일 롤 매핑 필요.
-> CRR 비동기 race(롤아웃이 복제보다 빠른 경우) 대응: 오하이오에서 `kubectl rollout restart deployment/stockops-api -n stockops` 로 수동 재롤아웃.
+> ECR 은 리전별 독립 리포(서울/오하이오 각각 `stockops-api`/`stockops-ai`)이고, CI 가 양 리전에 **직접 push**한다(Option B). CRR(Cross-Region Replication)을 쓰지 않으므로 복제 지연 race 가 없고 리전별 롤백이 가능하다. OIDC Role 의 `ecr_arns` 에 오하이오 리포 ARN 이 하드코딩되어 있어 양 리전 push 권한을 모두 보유한다.
 
 ---
 
@@ -347,7 +346,7 @@ gh workflow run deploy.yml
 ```
 
 - 정적(client/admin): Vite 빌드 → S3 sync → CloudFront 무효화
-- 동적(api/ai): 이미지 빌드 → 서울 ECR push(OIDC) → CRR → `kubectl rollout restart`
+- 동적(api/ai): 이미지 빌드 → 서울+오하이오 ECR 직접 push(OIDC) → `kubectl rollout restart`
 
 ### 검증
 
@@ -436,11 +435,11 @@ Invoke-WebRequest -Uri "https://www.amazontrust.com/repository/AmazonRootCA1.pem
 
 - [x] VPC + EKS + ALB + RDS + ECR 배포 (서울)
 - [x] GitHub Actions OIDC 전환 (액세스 키 제거)
-- [x] IoT Core + SQS + Firehose 팬아웃 파이프라인 (실시간 + Parquet/Athena 분석)
+- [x] IoT Core + SQS + Firehose 팬아웃 파이프라인 (실시간 SQS + GZIP/날짜파티션 S3 → Athena 분석)
 - [x] S3 Terraform backend + state 중앙화 (seoul/ohio/global 분리)
 - [x] Secrets Manager + ESO 연동 (시크릿 자동화)
 - [x] ArgoCD 설치
-- [x] 멀티 리전 (오하이오) 풀스택 + ECR replication
+- [x] 멀티 리전 (오하이오) 풀스택 + 리전별 독립 ECR (CI 직접 push)
 - [x] Cross-Region RDS Read Replica
 - [x] Global Accelerator (HTTP/HTTPS 리스너, 지연 라우팅)
 - [x] Karpenter + HPA (노드/파드 오토스케일링)
@@ -455,12 +454,7 @@ Invoke-WebRequest -Uri "https://www.amazontrust.com/repository/AmazonRootCA1.pem
 - [x] WAF — ALB/GA/CloudFront 앞단 보안
 - [x] **api-server SQS 컨슈머 → Redis → 웹 실시간 표시 E2E 완성** (env+IRSA+sts+JSON매핑+센서등록) ✨ 2026-06-15
 - [x] **팀원 SSO 권한셋 aws-auth 매핑** (kubectl/ArgoCD 공동 작업)
+- [x] ArgoCD 앱 구성 (GitOps CD)
 - [ ] AI 기능 활성화 (Bedrock/Gemini/Vertex 중 택1 — 제공자 기본 비활성, Model Access + IRSA/키 필요. 비용 절감 위해 별도 프리티어 계정 크로스어카운트 검토 중)
-- [ ] 나머지 센서(온습도/공기질) 등록 + 임계치(warn/crit) 설정 → 알림 로직 연동
-- [ ] 오하이오 SQS 컨슈머 검증 (failover 시 동일 경로) + 오하이오 sensor_devices 등록
-- [ ] 시크릿 평문 입력 개선 (tfvars → Secrets Manager data source / random_password)
-- [ ] ArgoCD 앱 구성 (GitOps CD)
-- [ ] Azure 트랜잭션 로그 백업 (3차 방어)
-- [ ] Observability 스택 (Grafana/Prometheus)
 
 자세한 아키텍처는 `ARCHITECTURE.md`, AWS 리소스 목록은 `AWS_RESOURCES.md` 참고.

@@ -21,3 +21,18 @@ output "priv_db_subnet_ids" {
   description = "프라이빗 DB 서브넷 ID 목록 (RDS 서브넷 그룹용)"
   value       = [aws_subnet.priv_db_sub_2a.id, aws_subnet.priv_db_sub_2c.id]
 }
+
+output "priv_app_rt_id" {
+  description = "프라이빗 앱 라우팅 테이블 ID (VPC 피어링 라우트 추가용)"
+  value       = aws_route_table.priv_app_rt.id
+}
+
+output "priv_db_rt_id" {
+  description = "프라이빗 DB 라우팅 테이블 ID (VPC 피어링 라우트 추가용)"
+  value       = aws_route_table.priv_db_rt.id
+}
+
+output "pub_rt_id" {
+  description = "퍼블릭 라우팅 테이블 ID (VPC 피어링 라우트 추가용)"
+  value       = aws_route_table.pub_rt.id
+}

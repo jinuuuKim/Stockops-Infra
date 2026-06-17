@@ -41,13 +41,13 @@ variable "gemini_api_key" {
   default   = ""
 }
 
-variable "aws_access_key_id" {
+variable "stockops_bedrock_aws_access_key_id" {
   type      = string
   sensitive = true
   default   = ""
 }
 
-variable "aws_secret_access_key" {
+variable "stockops_bedrock_aws_secret_access_key" {
   type      = string
   sensitive = true
   default   = ""

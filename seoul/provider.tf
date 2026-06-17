@@ -38,6 +38,12 @@ provider "aws" {
   profile = "siseon"
 }
 
+provider "aws" {
+  alias   = "ohio"
+  region  = "us-east-2"
+  profile = "siseon"
+}
+
 provider "kubernetes" {
   host                   = module.seoul_eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.seoul_eks.cluster_ca_certificate)

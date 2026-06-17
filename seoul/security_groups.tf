@@ -85,3 +85,14 @@ resource "aws_security_group_rule" "vpc_internal_to_db" {
   security_group_id = aws_security_group.seoul_db_sg.id
   cidr_blocks       = ["10.0.0.0/16"]
 }
+
+# VPC 피어링 — Ohio 앱 서브넷에서 Seoul RDS 접근 (크로스 리전 쓰기)
+resource "aws_security_group_rule" "ohio_to_seoul_db" {
+  type              = "ingress"
+  from_port         = 5432
+  to_port           = 5432
+  protocol          = "tcp"
+  security_group_id = aws_security_group.seoul_db_sg.id
+  cidr_blocks       = ["10.1.0.0/16"]
+  description       = "VPC peering: Ohio to Seoul RDS"
+}

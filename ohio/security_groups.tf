@@ -85,3 +85,25 @@ resource "aws_security_group_rule" "vpc_internal_to_db" {
   security_group_id = aws_security_group.ohio_db_sg.id
   cidr_blocks       = ["10.1.0.0/16"]
 }
+
+# VPC 피어링 — Seoul Grafana → Ohio Prometheus 스크레이핑
+resource "aws_security_group_rule" "seoul_to_ohio_prometheus" {
+  type              = "ingress"
+  from_port         = 9090
+  to_port           = 9090
+  protocol          = "tcp"
+  security_group_id = module.ohio_eks.cluster_security_group_id
+  cidr_blocks       = ["10.0.0.0/16"]
+  description       = "VPC peering: Seoul Grafana to Ohio Prometheus"
+}
+
+# VPC 피어링 — Seoul 앱 서브넷에서 Ohio RDS Replica 접근 (크로스 리전 읽기)
+resource "aws_security_group_rule" "seoul_to_ohio_db" {
+  type              = "ingress"
+  from_port         = 5432
+  to_port           = 5432
+  protocol          = "tcp"
+  security_group_id = aws_security_group.ohio_db_sg.id
+  cidr_blocks       = ["10.0.0.0/16"]
+  description       = "VPC peering: Seoul to Ohio RDS Replica"
+}

@@ -20,8 +20,8 @@ resource "aws_secretsmanager_secret_version" "stockops" {
     AI_MODULE_API_KEY           = var.ai_module_api_key
     GEMINI_API_KEY              = var.gemini_api_key
 
-    AWS_ACCESS_KEY_ID     = var.aws_access_key_id
-    AWS_SECRET_ACCESS_KEY = var.aws_secret_access_key
+    STOCKOPS_BEDROCK_AWS_ACCESS_KEY_ID     = var.stockops_bedrock_aws_access_key_id
+    STOCKOPS_BEDROCK_AWS_SECRET_ACCESS_KEY = var.stockops_bedrock_aws_secret_access_key
 
     STOCKOPS_BEDROCK_KNOWLEDGE_BASE_ID = var.bedrock_knowledge_base_id
     STOCKOPS_BEDROCK_AGENT_ID          = var.bedrock_agent_id
