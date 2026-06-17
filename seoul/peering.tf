@@ -86,15 +86,15 @@ resource "aws_route" "seoul_to_ohio" {
 }
 
 # ── Ohio 라우팅 테이블 → Seoul CIDR (10.0.0.0/16) — 직접 ID 지정 ──────────
-# rtb-0acbf7ecde0df6aa3: priv-app-rt (AZ-a)
-# rtb-00f461119d6d43589: priv-app-rt (AZ-c) 또는 추가 RT
-# rtb-0b88feb3e127955b2: priv-db-rt
+# rtb-06cecbd589694879c: ohio-priv-app-rt
+# rtb-0374a111e630ce9e3: ohio-priv-db-rt
+# rtb-065140b16bc92cc3d: ohio-pub-rt
 
 locals {
   ohio_private_rt_ids = toset([
-    "rtb-0acbf7ecde0df6aa3",
-    "rtb-00f461119d6d43589",
-    "rtb-0b88feb3e127955b2",
+    "rtb-06cecbd589694879c",
+    "rtb-0374a111e630ce9e3",
+    "rtb-065140b16bc92cc3d",
   ])
 }
 

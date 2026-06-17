@@ -281,28 +281,52 @@ ArgoCD (CD) — v7.7.0 설치 완료, 앱 구성 예정 (허브-스포크: 서�
 - 각 리전 `terraform.tfvars` 생성 (jwt_secret, db_username, db_password)
 - 정적 프론트 S3 버킷(`siseon-frontend-client`, `siseon-frontend-admin`)은 사전 존재(글로벌이 `data` 로 참조)
 
-### 배포 순서 (`seoul → ohio → global`)
+### 배포 순서
+
+> **VPC Peering 도입으로 순서가 변경됨.** `seoul/peering.tf` 가 Ohio VPC를 참조하므로 Ohio가 먼저 올라와야 Seoul peering이 성공한다.
+
+#### 전체 신규 구축 (`seoul core → ohio → seoul peering → global`)
 
 ```powershell
-# 1. 서울
+# 1. 서울 core (VPC·EKS·RDS·Secrets 등 — peering은 Ohio 없어 실패할 수 있으나 무시)
 cd seoul
 aws eks update-kubeconfig --region ap-northeast-2 --name seoul-cluster --profile siseon
 terraform apply -auto-approve
 
-# 2. 오하이오 (※ 현재는 비용 절감차 생략 가능 — global의 ohio 참조를 off로 둔 경우)
+# 2. 오하이오 (Seoul remote state 참조 → Seoul이 먼저 있어야 함)
 cd ..\ohio
-terraform apply --% -auto-approve -target=aws_acm_certificate.ohio -target=aws_route53_record.cert_validation -target=aws_acm_certificate_validation.ohio
-terraform apply --% -auto-approve -target=module.ohio_vpc -target=module.ohio_alb -target=module.ohio_eks -target=aws_db_instance.ohio_replica
 aws eks update-kubeconfig --region us-east-2 --name ohio-cluster --profile siseon
 terraform apply -auto-approve
 
-# 3. 글로벌 (GA + Route53 A + CloudFront/S3 + CloudFront ACM)
+# 3. 서울 재실행 (Ohio VPC 생성 후 peering.tf 성공 → 피어링 + 라우트 생성)
+cd ..\seoul
+terraform apply -auto-approve
+
+# 4. 글로벌 (GA + Route53 A + CloudFront/S3 + CloudFront ACM)
 cd ..\global
 terraform apply -auto-approve
 ```
 
-> 오하이오를 올리지 않을 때는 `global` 의 `terraform_remote_state.ohio` + 오하이오 GA 엔드포인트 그룹을 off(주석 또는 `enable_ohio=false`)로 두고 `seoul → global` 만 apply.
+#### Seoul 살아있는 상태에서 Ohio만 재구축
+
+```powershell
+# 1. 오하이오 apply
+cd ohio
+terraform apply -auto-approve
+aws eks update-kubeconfig --region us-east-2 --name ohio-cluster --profile siseon
+
+# 2. 서울 apply (새 Ohio VPC로 피어링 재연결 + 라우트 재생성)
+#    ※ ohio_private_rt_ids 하드코딩 값이 바뀌었으면 seoul/peering.tf 먼저 갱신 (아래 트러블슈팅 참조)
+cd ..\seoul
+terraform apply -auto-approve
+
+# 3. 글로벌 (이미 존재하면 no-op)
+cd ..\global
+terraform apply -auto-approve
+```
+
 > Cross-Region Replica(오하이오 RDS) 생성에 약 25분. ACM 검증은 NS 전파 후 자동 완료(5~15분).
+> 오하이오를 올리지 않을 때는 `global` 의 `terraform_remote_state.ohio` + 오하이오 GA 엔드포인트 그룹을 off(주석 또는 `enable_ohio=false`)로 두고 `seoul → global` 만 apply.
 
 ### 센서 디바이스 등록 (실시간 표시 전제)
 
@@ -377,29 +401,67 @@ kubectl logs -n stockops -l app=stockops-api --tail=100 | findstr /I "SQS ingest
 
 ## 종료 (destroy)
 
-**반드시 역순으로 진행 (`global → ohio → seoul`)**
+> **VPC Peering 도입으로 순서가 변경됨.**
+> Seoul state가 VPC Peering을 소유하고 있어 **Peering이 존재하는 한 Ohio VPC를 삭제할 수 없다.**
+> Ohio RDS Replica는 Seoul RDS Primary를 참조하므로 Ohio를 Seoul보다 먼저 destroy해야 한다.
+> 따라서 **Seoul peering을 먼저 targeted destroy → Ohio 전체 → Seoul 전체** 순으로 진행한다.
 
 ```powershell
-# 1. 글로벌 (GA가 ALB 참조 → 먼저 삭제)
+# 1. 글로벌 (GA·CloudFront·ACM·Route53 레코드 먼저 삭제)
 cd global
 terraform destroy -auto-approve
 
-# 2. 오하이오 (TGB 먼저)
+# 2. 서울 — peering 리소스만 targeted destroy (Ohio VPC 삭제 블록 해제)
+cd ..\seoul
+# seoul/peering.tf 의 ohio_private_rt_ids 에 있는 RT ID 값으로 대체
+terraform destroy -auto-approve `
+  "-target=aws_vpc_peering_connection_accepter.ohio" `
+  "-target=aws_vpc_peering_connection_options.ohio" `
+  "-target=aws_vpc_peering_connection_options.seoul" `
+  "-target=aws_vpc_peering_connection.seoul_to_ohio" `
+  "-target=aws_route.seoul_to_ohio[""<seoul-pub-rt-id>""]" `
+  "-target=aws_route.seoul_to_ohio[""<seoul-priv-app-rt-id>""]" `
+  "-target=aws_route.seoul_to_ohio[""<seoul-priv-db-rt-id>""]" `
+  "-target=aws_route.ohio_to_seoul[""<ohio-rt-id-1>""]" `
+  "-target=aws_route.ohio_to_seoul[""<ohio-rt-id-2>""]" `
+  "-target=aws_route.ohio_to_seoul[""<ohio-rt-id-3>""]"
+
+# 3. 오하이오 전체 destroy (VPC Peering 해제됐으므로 VPC 삭제 가능)
 cd ..\ohio
-terraform destroy --% -auto-approve -target=kubectl_manifest.api_tgb -target=kubectl_manifest.ai_tgb
 terraform destroy -auto-approve
 
-# 3. 서울 (ArgoCD CRD + TGB 먼저)
+# 4. 서울 전체 destroy (RDS Primary 등 나머지)
 cd ..\seoul
-kubectl delete crd applications.argoproj.io applicationsets.argoproj.io appprojects.argoproj.io --ignore-not-found
-terraform destroy --% -auto-approve -target=kubectl_manifest.api_tgb -target=kubectl_manifest.ai_tgb
 terraform destroy -auto-approve
 ```
 
-> 프론트가 CloudFront/S3 로 이전된 뒤로 TGB 는 `api_tgb`/`ai_tgb` 만 존재(client_tgb/admin_tgb 제거됨).
 > 정적 S3 버킷은 `data` 참조라 destroy 해도 버킷·자산 유지(팀 패턴).
-> destroy 순서 위반 시 Cross-Region ACM 참조 에러 발생. 오하이오 RDS(Replica)는 서울 RDS보다 먼저 삭제.
-> IoT Policy/Thing detach 실패(외부 참조 인증서가 state에 없을 때) 시 수동 `aws iot detach-policy` / `aws iot detach-thing-principal` 필요.
+> IoT Policy/Thing detach 실패 시 수동 `aws iot detach-policy` / `aws iot detach-thing-principal` 필요.
+
+### Destroy 트러블슈팅
+
+| 증상 | 원인 | 해결 |
+|------|------|------|
+| Ohio `terraform destroy` 중 `helm_release.argocd` 가 10분+ "Still destroying..." | ArgoCD Application finalizer가 namespace 삭제를 블록 | `kubectl patch application <name> -n argocd --context <ohio-ctx> --type merge -p '{"metadata":{"finalizers":null}}'` → `kubectl delete namespace argocd --grace-period=0 --force` → 그래도 멈추면 terraform 프로세스 강제 종료(`Get-Process terraform \| Stop-Process -Force`) → `terraform force-unlock -force <lock-id>` → `terraform state rm helm_release.argocd kubernetes_namespace_v1.stockops` → destroy 재실행 |
+| Ohio VPC destroy 중 `DependencyViolation` | Seoul state 소유 VPC Peering(pcx-xxx)이 남아있음 | 위 2단계(Seoul targeted destroy)를 먼저 실행. 이미 진행 중이라면 `aws ec2 delete-vpc-peering-connection --vpc-peering-connection-id <pcx-id> --region us-east-2 --profile siseon` 으로 수동 삭제 후 `terraform -chdir=seoul state rm aws_vpc_peering_connection.seoul_to_ohio ...` (10개 항목) |
+| terraform이 state lock을 잡은 채 멈춤 | 백그라운드 프로세스가 lock 파일을 유지 | `Get-Process terraform \| Stop-Process -Force` → `terraform force-unlock -force <lock-id>` |
+| Ohio destroy 후 Seoul apply 시 peering 관련 에러 | Ohio가 사라진 뒤 Seoul state에 stale peering 항목이 남음 | `terraform -chdir=seoul state rm aws_vpc_peering_connection.seoul_to_ohio aws_vpc_peering_connection_accepter.ohio aws_vpc_peering_connection_options.ohio aws_vpc_peering_connection_options.seoul` + route 항목 6개 추가 rm → Seoul apply 재실행 |
+| Ohio 재구축 후 Seoul apply 시 peering route 에러 | `ohio_private_rt_ids` 하드코딩 RT ID가 재생성으로 변경됨 | `aws ec2 describe-route-tables --region us-east-2 --profile siseon --filters "Name=tag:Name,Values=ohio-priv-app-rt,ohio-priv-db-rt,ohio-pub-rt" --query "RouteTables[*].[RouteTableId,Tags[?Key=='Name'].Value\|[0]]" --output text` 로 새 ID 확인 → `seoul/peering.tf` 의 `ohio_private_rt_ids` 수정 후 apply |
+
+### Apply 후 ArgoCD Application 등록
+
+EKS 클러스터를 새로 만든 뒤에는 ArgoCD가 설치되지만 Application은 자동 등록되지 않는다. 수동으로 적용해야 한다.
+
+```powershell
+# Seoul
+kubectl apply -f "C:\KJW\Team_Project\Stockops-GitOps\argocd\stockops-seoul-application.yaml" `
+  --context arn:aws:eks:ap-northeast-2:448768137813:cluster/seoul-cluster
+
+# Ohio
+aws eks update-kubeconfig --name ohio-cluster --region us-east-2 --profile siseon
+kubectl apply -f "C:\KJW\Team_Project\Stockops-GitOps\argocd\stockops-ohio-application.yaml" `
+  --context arn:aws:eks:us-east-2:448768137813:cluster/ohio-cluster
+```
 
 ### destroy 후 잔재 확인
 

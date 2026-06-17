@@ -9,6 +9,10 @@ StockOps 멀티리전 AWS 인프라(Terraform IaC). 3개의 독립된 state로 �
 `infra/seoul`(primary), `infra/ohio`(failover), `infra/global`(Route53/ACM/Global Accelerator).
 global은 seoul/ohio의 output을 `terraform_remote_state`로 참조하므로 **순서에 의존성이 있음**.
 
+**VPC Peering 관리 방식:** Seoul ↔ Ohio 피어링은 `seoul/peering.tf` 단일 파일에서 전부 관리한다.
+Seoul state가 피어링 연결·수락·양방향 라우트를 모두 소유하며, Ohio alias provider(`provider "aws" { alias = "ohio" }`)를 통해 Ohio 측 리소스도 Seoul state에서 조작한다.
+이 설계로 인해 **VPC Peering이 Apply/Destroy 순서에 영향을 준다** (아래 참조).
+
 ## 자동 실행 원칙 (가장 중요)
 
 - terraform plan/apply/destroy를 실행할 때 **반드시 `-auto-approve`를 붙인다.** 이게 없으면 terraform이 콘솔에서 "yes"를 기다리며 멈춘다 — Claude Code의 권한 프롬프트와는 별개의 문제이니 항상 플래그로 해결한다.
@@ -18,9 +22,48 @@ global은 seoul/ohio의 output을 `terraform_remote_state`로 참조하므로 **
 
 ## Apply / Destroy 순서
 
-- **Apply**: Seoul → Ohio → Global (global이 seoul/ohio의 ALB ARN 등을 remote state로 참조하기 때문)
-- **Destroy**: Global → Ohio → Seoul (apply의 역순. global이 참조하는 리소스를 먼저 없는 상태로 만들면 안 되고, Ohio의 RDS Read Replica가 Seoul의 RDS Primary를 참조하므로 Replica를 먼저 지워야 함)
-- 각 region 디렉터리에서 독립적으로 `terraform destroy -auto-approve` / `terraform apply -auto-approve` 실행
+### Apply (전체 신규 구축)
+
+```
+1. Seoul   → VPC·EKS·RDS·Secrets 등 core 리소스 생성
+             ※ peering.tf는 Ohio VPC가 없어 실패할 수 있음 → 무시하고 다음 단계로
+2. Ohio    → VPC·EKS·RDS 생성 (Seoul remote state 참조)
+3. Seoul   → 재실행 (Ohio VPC가 생긴 후 peering.tf가 성공, 피어링 + 라우트 생성)
+4. Global  → Route53·ACM·CloudFront·WAF 생성 (Seoul/Ohio ALB ARN 참조)
+```
+
+### Apply (Seoul 살아있는 상태에서 Ohio만 재구축)
+
+```
+1. Ohio    → 신규 VPC·EKS·RDS 생성
+2. Seoul   → peering.tf가 새 Ohio VPC를 감지, 피어링 재연결 + 라우트 재생성
+             ※ seoul/peering.tf의 ohio_private_rt_ids 하드코딩 RT ID가 바뀌었으면 먼저 갱신 (아래 주의사항 참조)
+3. Global  → 이미 존재하면 no-op, 재구축이면 신규 생성
+```
+
+### Destroy (전체)
+
+> **핵심 제약:**
+> - VPC Peering(Seoul state 소유)이 존재하면 Ohio VPC를 삭제할 수 없음 → **Seoul peering 먼저 제거**
+> - Ohio RDS Replica가 Seoul RDS Primary를 참조 → **Ohio를 Seoul보다 먼저 destroy**
+
+```
+1. Global  → CloudFront·WAF·ACM·Route53 레코드 삭제
+2. Seoul   → peering 리소스만 targeted destroy (Ohio VPC 삭제 블록 해제)
+             terraform -chdir=seoul destroy -auto-approve \
+               -target=aws_vpc_peering_connection_accepter.ohio \
+               -target=aws_vpc_peering_connection_options.ohio \
+               -target=aws_vpc_peering_connection_options.seoul \
+               -target=aws_vpc_peering_connection.seoul_to_ohio \
+               -target='aws_route.seoul_to_ohio["<rt-id-1>"]' \
+               -target='aws_route.seoul_to_ohio["<rt-id-2>"]' \
+               -target='aws_route.seoul_to_ohio["<rt-id-3>"]' \
+               -target='aws_route.ohio_to_seoul["<rt-id-1>"]' \
+               -target='aws_route.ohio_to_seoul["<rt-id-2>"]' \
+               -target='aws_route.ohio_to_seoul["<rt-id-3>"]'
+3. Ohio    → 전체 destroy (VPC 포함)
+4. Seoul   → 전체 destroy (RDS Primary 등)
+```
 
 ## 알려진 트러블슈팅 패턴 (자동 해결)
 
@@ -31,11 +74,21 @@ global은 seoul/ohio의 output을 `terraform_remote_state`로 참조하므로 **
 | RDS parameter group 삭제가 막힘 | 해당 parameter group을 쓰는 RDS 인스턴스가 아직 살아있는지 확인, 인스턴스 삭제 완료 후 재시도 |
 | ECR repo가 destroy 대상에 포함되어 있음 | ECR은 `data` source로 유지해야 destroy cycle에서 안전 — `resource`로 되어있다면 `data`로 전환 |
 | `terraform destroy` 중 ArgoCD CRD 관련 kubectl 에러 | 무시 가능, destroy를 막지 않음 |
-| `helm_release.argocd`가 "Still destroying..."로 멈춤 | 1) `kubectl get applications -n argocd` 확인 2) 각 Application에 `kubectl patch application <name> -n argocd --type merge -p '{"metadata":{"finalizers":null}}'` 로 finalizer 제거 3) 그래도 안 풀리면 `terraform state rm helm_release.argocd` + `kubectl delete namespace argocd --grace-period=0 --force` |
+| `helm_release.argocd`가 "Still destroying..."로 멈춤 | 1) `kubectl get applications -n argocd` 확인 2) 각 Application에 `kubectl patch application <name> -n argocd --type merge -p '{"metadata":{"finalizers":null}}'` 로 finalizer 제거 3) `kubectl delete namespace argocd --grace-period=0 --force` 4) 그래도 안 풀리면 terraform 프로세스 kill → `terraform force-unlock <lock-id>` → `terraform state rm helm_release.argocd kubernetes_namespace_v1.stockops` → destroy 재실행 |
+| terraform 프로세스가 백그라운드에서 state lock을 잡은 채 멈춤 | `Get-Process terraform \| Stop-Process -Force` 로 프로세스 종료 → lock ID 확인 후 `terraform force-unlock -force <lock-id>` |
 | subnet destroy가 "Still destroying..."로 멈춤 | `aws ec2 describe-network-interfaces --filters "Name=subnet-id,Values=<id>"`로 ENI 확인 → `available` 상태면 `aws ec2 delete-network-interface`로 직접 삭제 → `in-use`면 원인 리소스(ELB/Lambda/EKS 노드) 먼저 정리 |
+| Ohio VPC destroy 시 "DependencyViolation" 오류 | VPC Peering이 남아있는 것이 원인. `aws ec2 describe-vpc-peering-connections --region us-east-2 --filters "Name=accepter-vpc-info.vpc-id,Values=<vpc-id>"` 로 pcx 확인 → `aws ec2 delete-vpc-peering-connection --vpc-peering-connection-id <pcx-id> --region us-east-2` 로 삭제 → Seoul state에서도 peering 항목 state rm (아래 참조) |
+| Ohio destroy 후 Seoul state에 peering 관련 항목이 남음 | `terraform -chdir=seoul state rm aws_vpc_peering_connection.seoul_to_ohio aws_vpc_peering_connection_accepter.ohio aws_vpc_peering_connection_options.ohio aws_vpc_peering_connection_options.seoul 'aws_route.ohio_to_seoul["rtb-xxx"]'` … 총 10개 항목 제거 후 Seoul apply 재실행 |
+| Ohio VPC 재생성 후 Seoul peering.tf의 Ohio RT ID가 맞지 않음 | `aws ec2 describe-route-tables --region us-east-2 --filters "Name=tag:Name,Values=ohio-priv-app-rt,ohio-priv-db-rt,ohio-pub-rt" --query "RouteTables[*].[RouteTableId,Tags[?Key=='Name'].Value\|[0]]" --output text` 로 새 ID 확인 → `seoul/peering.tf`의 `ohio_private_rt_ids` 업데이트 후 Seoul apply |
 | IoT 인증서가 `var.iot_certificate_arn`으로 참조됨 | destroy cycle을 살리기 위한 의도된 설계이므로 변경하지 않음 |
 
 새로운 패턴을 발견하면 이 표에 추가해서 다음 세션에도 재사용한다.
+
+## VPC Peering 관련 주의사항
+
+- `seoul/peering.tf`의 `ohio_private_rt_ids`는 **Ohio RT ID를 하드코딩**하고 있음. Ohio VPC가 재생성되면 RT ID가 바뀌므로 반드시 갱신해야 한다.
+- Seoul 측 RT ID(`seoul_rt_ids`)는 VPC 모듈 output(`pub_rt_id`, `priv_app_rt_id`, `priv_db_rt_id`)을 참조하므로 Seoul VPC 재생성 시 자동 갱신됨. 별도 작업 불필요.
+- Destroy 시 Seoul targeted destroy를 생략하고 수동으로 `aws ec2 delete-vpc-peering-connection`을 쓸 수도 있으나, 이후 반드시 Seoul state rm을 해줘야 다음 apply가 깨끗하게 동작한다.
 
 ## 절대 묻지 않아도 되는 것 / 예외적으로 멈춰야 하는 것
 
