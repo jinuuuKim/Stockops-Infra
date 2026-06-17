@@ -5,7 +5,7 @@
 resource "aws_route53_zone" "main" {
   name              = var.domain
   delegation_set_id = var.delegation_set_id
-  tags = { Name = "${var.domain}-zone" }
+  tags              = { Name = "${var.domain}-zone" }
 }
 
 resource "aws_acm_certificate" "seoul" {

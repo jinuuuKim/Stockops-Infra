@@ -109,7 +109,7 @@ resource "kubernetes_config_map_v1_data" "aws_auth" {
       }
     ])
   }
-  force = true
+  force      = true
   depends_on = [module.seoul_eks]
 }
 

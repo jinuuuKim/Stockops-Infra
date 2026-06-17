@@ -6,11 +6,11 @@
 module "seoul_iot" {
   source = "../modules/iot"
 
-  thing_name     = "mosquitto-bridge"
-  client_id      = "mosquitto-bridge-seoul"
-  topic_prefix   = "sensimul/sites"
-  sqs_queue_name = "stockops-sensor-data"
-  sqs_dlq_name   = "stockops-sensor-data-dlq"
+  thing_name          = "mosquitto-bridge"
+  client_id           = "mosquitto-bridge-seoul"
+  topic_prefix        = "sensimul/sites"
+  sqs_queue_name      = "stockops-sensor-data"
+  sqs_dlq_name        = "stockops-sensor-data-dlq"
   iot_certificate_arn = "arn:aws:iot:ap-northeast-2:448768137813:cert/c4ac7c856fb6d989679beb685b379df60d7077cdf4f3543593af3ccfeefac826"
 }
 
@@ -53,7 +53,7 @@ resource "aws_iam_role_policy" "api_sqs" {
         "sqs:GetQueueAttributes",
         "sqs:ChangeMessageVisibility",
       ]
-      Resource = module.seoul_iot.sqs_queue_arn   # 기존 output 그대로 사용
+      Resource = module.seoul_iot.sqs_queue_arn # 기존 output 그대로 사용
     }]
   })
 }

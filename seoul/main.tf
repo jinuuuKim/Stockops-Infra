@@ -14,7 +14,7 @@ module "seoul_vpc" {
   priv_app_sub_2c_cidr = "10.0.12.0/24"
   priv_db_sub_2a_cidr  = "10.0.21.0/24"
   priv_db_sub_2c_cidr  = "10.0.22.0/24"
-  cluster_name = "seoul-cluster"
+  cluster_name         = "seoul-cluster"
 }
 
 module "seoul_alb" {
@@ -36,20 +36,20 @@ module "seoul_eks" {
   db_sg_id            = aws_security_group.seoul_db_sg.id
   spring_tg_arn       = module.seoul_alb.spring_tg_arn
   fastapi_tg_arn      = module.seoul_alb.fastapi_tg_arn
-  node_desired = 2
-  node_min     = 2
-  node_max     = 4
+  node_desired        = 2
+  node_min            = 2
+  node_max            = 4
 }
 
 module "seoul_karpenter" {
   source = "../modules/karpenter"
 
-  cluster_name      = "seoul-cluster"
-  cluster_endpoint  = module.seoul_eks.cluster_endpoint
-  oidc_provider_arn = module.seoul_eks.oidc_provider_arn
-  oidc_provider     = module.seoul_eks.oidc_provider
-  region_name       = "seoul"
-  node_role_arn     = module.seoul_eks.node_role_arn
+  cluster_name                    = "seoul-cluster"
+  cluster_endpoint                = module.seoul_eks.cluster_endpoint
+  oidc_provider_arn               = module.seoul_eks.oidc_provider_arn
+  oidc_provider                   = module.seoul_eks.oidc_provider
+  region_name                     = "seoul"
+  node_role_arn                   = module.seoul_eks.node_role_arn
   create_spot_service_linked_role = true
 
   depends_on = [module.seoul_eks]
@@ -65,7 +65,7 @@ module "seoul_db" {
 }
 
 module "seoul_ecr" {
-  source   = "../modules/ecr"
+  source = "../modules/ecr"
   for_each = toset([
     "stockops-api",
     "stockops-ai",
