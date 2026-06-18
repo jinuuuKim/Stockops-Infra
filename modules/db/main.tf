@@ -56,7 +56,7 @@ resource "aws_db_instance" "this" {
   backup_retention_period = 7
   skip_final_snapshot     = true
 
-  # Multi-AZ는 비용 문제로 실제 배포 전에만 켜기
+  # Multi-AZ는 비용 문제로 주석 처리
   # multi_az = true
 
   tags = {
