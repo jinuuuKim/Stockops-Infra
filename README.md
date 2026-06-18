@@ -34,6 +34,7 @@ StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS
 > - **IoT 센서 → SQS → api-server → Redis → 웹 실시간 표시 경로 E2E 검증 완료** (2026-06-15). 도어 센서 20개 + 온도 센서 1개 실데이터 표시 확인.
 > - **GitOps CD 완성** (2026-06-18) — ArgoCD(서울/오하이오 독립 설치) + Stockops-GitOps 레포 연동. GitHub Actions가 ECR push + GitOps manifest 업데이트 → ArgoCD 자동 sync.
 > - **AI 기능 활성화** — `STOCKOPS_BEDROCK_ENABLED=true` (서울/오하이오 공통 적용).
+> - **디렉토리 구조 정리** (2026-06-18) — `seoul/ohio/global` → `regions/` 하위로 이동. `peering/`은 cross-region root로 루트에 유지.
 
 ---
 
@@ -41,7 +42,7 @@ StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS
 
 | 레포 | 내용 |
 |------|------|
-| **Stockops-Infra** | Terraform IaC (modules + seoul + ohio + global, state 분리) |
+| **Stockops-Infra** | Terraform IaC (modules + regions/{seoul,ohio,global} + peering, state 분리) |
 | **Stockops-Application** | 앱 모노레포 (포크 서브모듈: admin-web, ai-module, api-server, client-web, sensimul) + GitHub Actions |
 | **Stockops-GitOps** | ArgoCD용 K8s manifest (kustomize 기반, 서울/오하이오 overlay 분리) |
 
@@ -101,11 +102,13 @@ StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS
 
 ```
 Stockops-Infra/
-├── modules/          # 공통 모듈 (vpc, alb, eks, db, ecr, github-oidc, iot, karpenter)
-├── seoul/            # 서울 리전 (본사, 풀스택) + Route53 호스팅 존 + 서울 ACM(ALB용)
-├── ohio/             # 오하이오 리전 (미국, 풀스택 미러) + 오하이오 ACM
-├── peering/          # Seoul ↔ Ohio VPC 피어링 (remote_state로 양쪽 VPC ID·RT ID 참조, 하드코딩 없음)
-└── global/           # Global Accelerator + Route53 A 레코드 + CloudFront/S3(OAC) + CloudFront ACM(us-east-1)
+├── modules/                 # 공통 모듈 (vpc, alb, eks, db, ecr, github-oidc, iot, karpenter)
+├── regions/
+│   ├── seoul/               # 서울 리전 (본사, 풀스택) + Route53 호스팅 존 + 서울 ACM(ALB용)
+│   ├── ohio/                # 오하이오 리전 (미국, 풀스택 미러) + 오하이오 ACM
+│   └── global/              # Global Accelerator + Route53 A 레코드 + CloudFront/S3(OAC) + CloudFront ACM(us-east-1)
+├── peering/                 # Seoul ↔ Ohio VPC 피어링 (remote_state로 양쪽 VPC ID·RT ID 참조, 하드코딩 없음)
+└── bootstrap/               # S3 backend 버킷 + KMS 키 초기 생성
 ```
 
 ### Terraform State 구조 (S3 backend)
@@ -113,19 +116,19 @@ Stockops-Infra/
 ```
 siseon-terraform-state/
 └── infra/
-    ├── seoul/terraform.tfstate     # Route53 호스팅 존 소유
-    ├── ohio/terraform.tfstate
-    ├── peering/terraform.tfstate   # VPC Peering + 양방향 Route (seoul/ohio 양쪽 apply 완료 후 apply)
-    └── global/terraform.tfstate
+    ├── seoul/terraform.tfstate     # Route53 호스팅 존 소유  (regions/seoul/)
+    ├── ohio/terraform.tfstate      #                          (regions/ohio/)
+    ├── peering/terraform.tfstate   # VPC Peering + 양방향 Route (peering/)
+    └── global/terraform.tfstate    #                          (regions/global/)
 ```
 
 ### DNS / 인증서 관리 구조
 
 ```
-seoul/dns.tf   → Route53 호스팅 존 + 서울 ACM (ap-northeast-2, ALB HTTPS용)
-ohio/dns.tf    → 오하이오 ACM (us-east-2, ALB HTTPS용)
-global/acm.tf  → CloudFront ACM (us-east-1, siseon.live + *.siseon.live) ※ CloudFront는 us-east-1 인증서만 허용
-global/dns.tf  → Route53 A 레코드:
+regions/seoul/dns.tf   → Route53 호스팅 존 + 서울 ACM (ap-northeast-2, ALB HTTPS용)
+regions/ohio/dns.tf    → 오하이오 ACM (us-east-2, ALB HTTPS용)
+regions/global/acm.tf  → CloudFront ACM (us-east-1, siseon.live + *.siseon.live) ※ CloudFront는 us-east-1 인증서만 허용
+regions/global/dns.tf  → Route53 A 레코드:
                    siseon.live      → CloudFront(client)
                    app.siseon.live  → CloudFront(admin)
                    api.siseon.live  → Global Accelerator
@@ -291,24 +294,25 @@ ArgoCD (CD) — v7.7.0, 서울/오하이오 각 클러스터에 독립 설치
 
 ### 배포 순서
 
-> **VPC Peering 도입으로 순서가 변경됨.** `seoul/peering.tf` 가 Ohio VPC를 참조하므로 Ohio가 먼저 올라와야 Seoul peering이 성공한다.
+> Apply 순서: `regions/seoul → regions/ohio → peering → regions/global`
+> Seoul/Ohio는 서로 독립. 둘 다 완료 후 peering apply. peering은 `terraform_remote_state`로 양쪽 VPC ID·RT ID를 자동 참조.
 
-#### 전체 신규 구축 (`seoul → ohio → peering → global`)
+#### 전체 신규 구축 (`regions/seoul → regions/ohio → peering → regions/global`)
 
 ```powershell
 # 1. Seoul apply
 aws eks update-kubeconfig --region ap-northeast-2 --name seoul-cluster --profile siseon
-terraform -chdir=seoul apply -auto-approve
+terraform -chdir=regions/seoul apply -auto-approve
 
 # 2. Ohio apply (Seoul remote state 참조)
 aws eks update-kubeconfig --region us-east-2 --name ohio-cluster --profile siseon
-terraform -chdir=ohio apply -auto-approve
+terraform -chdir=regions/ohio apply -auto-approve
 
 # 3. Peering apply (Seoul/Ohio VPC ID·RT ID를 remote state에서 자동 참조)
 terraform -chdir=peering apply -auto-approve
 
 # 4. Global apply (GA + Route53 A + CloudFront/S3 + CloudFront ACM)
-terraform -chdir=global apply -auto-approve
+terraform -chdir=regions/global apply -auto-approve
 
 # 5. ArgoCD Application 등록 (EKS 재생성 시마다 필요)
 kubectl apply -f C:\KJW\Team_Project\Stockops-GitOps\argocd\stockops-seoul-application.yaml `
@@ -322,13 +326,13 @@ kubectl apply -f C:\KJW\Team_Project\Stockops-GitOps\argocd\stockops-ohio-applic
 ```powershell
 # 1. Ohio apply
 aws eks update-kubeconfig --region us-east-2 --name ohio-cluster --profile siseon
-terraform -chdir=ohio apply -auto-approve
+terraform -chdir=regions/ohio apply -auto-approve
 
 # 2. Peering apply (새 Ohio VPC ID·RT ID를 remote state에서 자동 감지 → 피어링 재연결)
 terraform -chdir=peering apply -auto-approve
 
 # 3. Global (이미 존재하면 no-op)
-terraform -chdir=global apply -auto-approve
+terraform -chdir=regions/global apply -auto-approve
 ```
 
 > Cross-Region Replica(오하이오 RDS) 생성에 약 25분. ACM 검증은 NS 전파 후 자동 완료(5~15분).
@@ -370,7 +374,7 @@ gh workflow run deploy.yml
 
 ```powershell
 kubectl get pods -n stockops
-terraform -chdir=global output
+terraform -chdir=regions/global output
 
 # 동적 API + CORS
 curl.exe -i -X OPTIONS https://api.siseon.live/api/v1/auth/login -H "Origin: https://app.siseon.live" -H "Access-Control-Request-Method: POST" | findstr /I "HTTP Access-Control-Allow"
@@ -401,16 +405,16 @@ kubectl logs -n stockops -l app=stockops-api --tail=100 | findstr /I "SQS ingest
 
 ```powershell
 # 1. Global (GA·CloudFront·ACM·Route53 레코드 먼저 삭제)
-terraform -chdir=global destroy -auto-approve
+terraform -chdir=regions/global destroy -auto-approve
 
 # 2. Peering (피어링·라우트 전체 삭제 → Ohio VPC 삭제 블록 해제)
 terraform -chdir=peering destroy -auto-approve
 
 # 3. Ohio (VPC 포함 전체 삭제)
-terraform -chdir=ohio destroy -auto-approve
+terraform -chdir=regions/ohio destroy -auto-approve
 
 # 4. Seoul (RDS Primary 등 나머지)
-terraform -chdir=seoul destroy -auto-approve
+terraform -chdir=regions/seoul destroy -auto-approve
 ```
 
 > 정적 S3 버킷은 `data` 참조라 destroy 해도 버킷·자산 유지(팀 패턴).

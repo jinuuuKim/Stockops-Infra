@@ -3,7 +3,7 @@
 # ==========================================================================
 
 module "github_oidc" {
-  source = "../modules/github-oidc"
+  source = "../../modules/github-oidc"
 
   github_org       = "jinuuuKim"
   github_repo      = "Stockops-Application"

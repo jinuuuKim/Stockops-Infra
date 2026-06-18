@@ -3,7 +3,7 @@
 # ==========================================================================
 
 module "ohio_vpc" {
-  source               = "../modules/vpc"
+  source               = "../../modules/vpc"
   region_name          = "ohio"
   az_a                 = "us-east-2a"
   az_c                 = "us-east-2c"
@@ -18,7 +18,7 @@ module "ohio_vpc" {
 }
 
 module "ohio_alb" {
-  source              = "../modules/alb"
+  source              = "../../modules/alb"
   region_name         = "ohio"
   vpc_id              = module.ohio_vpc.vpc_id
   public_subnet_ids   = module.ohio_vpc.public_subnet_ids
@@ -28,7 +28,7 @@ module "ohio_alb" {
 }
 
 module "ohio_eks" {
-  source              = "../modules/eks"
+  source              = "../../modules/eks"
   region_name         = "ohio"
   vpc_id              = module.ohio_vpc.vpc_id
   priv_app_subnet_ids = module.ohio_vpc.priv_app_subnet_ids
@@ -42,7 +42,7 @@ module "ohio_eks" {
 }
 
 module "ohio_karpenter" {
-  source = "../modules/karpenter"
+  source = "../../modules/karpenter"
 
   cluster_name      = "ohio-cluster"
   cluster_endpoint  = module.ohio_eks.cluster_endpoint
@@ -72,7 +72,7 @@ resource "aws_db_instance" "ohio_replica" {
 }
 
 module "ohio_ecr" {
-  source   = "../modules/ecr"
+  source   = "../../modules/ecr"
   for_each = toset([
     "stockops-api",
     "stockops-ai",

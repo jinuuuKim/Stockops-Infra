@@ -4,7 +4,7 @@
 # ==========================================================================
 
 module "seoul_iot" {
-  source = "../modules/iot"
+  source = "../../modules/iot"
 
   thing_name          = "mosquitto-bridge"
   client_id           = "mosquitto-bridge-seoul"

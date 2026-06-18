@@ -3,7 +3,7 @@
 # ==========================================================================
 
 module "seoul_vpc" {
-  source               = "../modules/vpc"
+  source               = "../../modules/vpc"
   region_name          = "seoul"
   az_a                 = "ap-northeast-2a"
   az_c                 = "ap-northeast-2c"
@@ -18,7 +18,7 @@ module "seoul_vpc" {
 }
 
 module "seoul_alb" {
-  source              = "../modules/alb"
+  source              = "../../modules/alb"
   region_name         = "seoul"
   vpc_id              = module.seoul_vpc.vpc_id
   public_subnet_ids   = module.seoul_vpc.public_subnet_ids
@@ -28,7 +28,7 @@ module "seoul_alb" {
 }
 
 module "seoul_eks" {
-  source              = "../modules/eks"
+  source              = "../../modules/eks"
   region_name         = "seoul"
   vpc_id              = module.seoul_vpc.vpc_id
   priv_app_subnet_ids = module.seoul_vpc.priv_app_subnet_ids
@@ -42,7 +42,7 @@ module "seoul_eks" {
 }
 
 module "seoul_karpenter" {
-  source = "../modules/karpenter"
+  source = "../../modules/karpenter"
 
   cluster_name                    = "seoul-cluster"
   cluster_endpoint                = module.seoul_eks.cluster_endpoint
@@ -56,7 +56,7 @@ module "seoul_karpenter" {
 }
 
 module "seoul_db" {
-  source             = "../modules/db"
+  source             = "../../modules/db"
   region_name        = "seoul"
   priv_db_subnet_ids = module.seoul_vpc.priv_db_subnet_ids
   db_sg_id           = aws_security_group.seoul_db_sg.id
@@ -65,7 +65,7 @@ module "seoul_db" {
 }
 
 module "seoul_ecr" {
-  source = "../modules/ecr"
+  source = "../../modules/ecr"
   for_each = toset([
     "stockops-api",
     "stockops-ai",
