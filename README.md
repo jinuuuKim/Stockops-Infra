@@ -30,9 +30,10 @@ StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS
 **보안**: 미국 영업팀은 최소 권한으로 앱/DB 접근 (본사 영향 차단), S3는 OAC 전용(퍼블릭 차단)
 
 > ### 📌 현재 배포 상태
-> - **서울 단일 리전 + 글로벌(CloudFront/GA/Route53)** 가동 중. 도메인 연결·CORS·정적 프론트 전환까지 검증 완료.
+> - **서울 + 오하이오 멀티 리전 + 글로벌(CloudFront/GA/Route53)** 전체 가동 중. 도메인 연결·CORS·정적 프론트 전환까지 검증 완료.
 > - **IoT 센서 → SQS → api-server → Redis → 웹 실시간 표시 경로 E2E 검증 완료** (2026-06-15). 도어 센서 20개 + 온도 센서 1개 실데이터 표시 확인.
-> - **오하이오는 비용 절감차 일시 토글 off** — `global` 의 `terraform_remote_state.ohio` + 오하이오 GA 엔드포인트 그룹(`ohio_http`/`ohio_https`) 을 주석/`enable_ohio` 플래그로 제어. 재활성화 시 오하이오 apply 후 `global` re-apply.
+> - **GitOps CD 완성** (2026-06-18) — ArgoCD(서울/오하이오 독립 설치) + Stockops-GitOps 레포 연동. GitHub Actions가 ECR push + GitOps manifest 업데이트 → ArgoCD 자동 sync.
+> - **AI 기능 활성화** — `STOCKOPS_BEDROCK_ENABLED=true` (서울/오하이오 공통 적용).
 
 ---
 
@@ -42,8 +43,10 @@ StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS
 |------|------|
 | **Stockops-Infra** | Terraform IaC (modules + seoul + ohio + global, state 분리) |
 | **Stockops-Application** | 앱 모노레포 (포크 서브모듈: admin-web, ai-module, api-server, client-web, sensimul) + GitHub Actions |
+| **Stockops-GitOps** | ArgoCD용 K8s manifest (kustomize 기반, 서울/오하이오 overlay 분리) |
 
 > `Stockops-Application` 은 각 앱을 **git submodule(포크)** 로 둔다. 커밋 순서: 서브모듈 내부 commit/push → 부모에서 `git add <submodule>` 로 포인터 갱신 → push 가 `deploy.yml` 트리거.
+> `Stockops-GitOps` 는 GitHub Actions가 이미지 태그를 업데이트하면 ArgoCD가 감지해서 클러스터에 자동 sync한다. 환경변수·리소스 설정 변경은 이 레포에서 직접 수정.
 
 ### 애플리케이션 컴포넌트
 
@@ -137,7 +140,7 @@ global/dns.tf  → Route53 A 레코드:
 |--------|------|----------|--------|
 | VPC | 10.0.0.0/16 | 10.1.0.0/16 | — |
 | EKS | seoul-cluster v1.30 | ohio-cluster v1.30 | — |
-| 노드 오토스케일 | Karpenter (replica 2) + HPA | Karpenter (replica 1) + HPA | — |
+| 노드 오토스케일 | Karpenter + HPA (metrics-server 포함) | Karpenter + HPA (metrics-server 포함) | — |
 | ALB | HTTPS + 경로 라우팅 (api/ws/ai) | 동일 | — |
 | RDS | PostgreSQL 18.4 (Master) | Read Replica | — |
 | ECR | 2개 리포 (api, ai) | 2개 리포 (api, ai) — 리전별 독립 | — |
@@ -256,20 +259,23 @@ $b64 = kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.d
 ## CI/CD
 
 ```
-GitHub Actions (CI) — main push / workflow_dispatch
+GitHub Actions (CI/CD) — main push / workflow_dispatch
 ├─ [정적] client-web / admin-web
 │    └─ Vite 빌드 (.env.production: VITE_API_BASE_URL=https://api.siseon.live/api)
 │         └─ aws s3 sync --delete  →  CloudFront create-invalidation
 │
 └─ [동적] api-server / ai-module
      └─ 이미지 빌드  →  서울 ECR + 오하이오 ECR 각각 직접 push (OIDC, 액세스 키 없음 / Option B)
-               └─ kubectl rollout restart (EKS 재배포; 서울 자동 + 오하이오 스텝)
+               └─ Stockops-GitOps kustomization.yaml 이미지 태그 업데이트 (Seoul + Ohio overlay)
+                        └─ ArgoCD 자동 감지 → 서울/오하이오 클러스터 각각 sync
 
-ArgoCD (CD) — v7.7.0 설치 완료, 앱 구성 예정 (허브-스포크: 서울 ArgoCD 가 서울+오하이오 관리)
+ArgoCD (CD) — v7.7.0, 서울/오하이오 각 클러스터에 독립 설치
+  ├─ stockops-seoul Application → Stockops-GitOps/apps/stockops/seoul
+  └─ stockops-ohio  Application → Stockops-GitOps/apps/stockops/ohio
 ```
 
-> GitHub Actions Role(OIDC, `github-actions-ecr-push`)은 각 EKS `aws-auth` ConfigMap 에 등록되어 있어야 `kubectl rollout restart` 가 동작(Terraform 관리). 오하이오 롤아웃을 쓰려면 오하이오 `aws-auth` 에도 동일 롤 매핑 필요.
-> ECR 은 리전별 독립 리포(서울/오하이오 각각 `stockops-api`/`stockops-ai`)이고, CI 가 양 리전에 **직접 push**한다(Option B). CRR(Cross-Region Replication)을 쓰지 않으므로 복제 지연 race 가 없고 리전별 롤백이 가능하다. OIDC Role 의 `ecr_arns` 에 오하이오 리포 ARN 이 하드코딩되어 있어 양 리전 push 권한을 모두 보유한다.
+> ECR 은 리전별 독립 리포(서울/오하이오 각각 `stockops-api`/`stockops-ai`)이고, CI 가 양 리전에 **직접 push**한다(Option B). CRR(Cross-Region Replication)을 쓰지 않으므로 복제 지연 race 가 없고 리전별 롤백이 가능하다.
+> ArgoCD는 허브-스포크가 아닌 **각 클러스터 독립 설치** 방식. GitOps 저장소의 manifest 변경(GitHub Actions의 이미지 태그 업데이트 또는 직접 수정)을 감지해 자동 sync한다.
 
 ---
 
@@ -287,24 +293,36 @@ ArgoCD (CD) — v7.7.0 설치 완료, 앱 구성 예정 (허브-스포크: 서�
 
 #### 전체 신규 구축 (`seoul core → ohio → seoul peering → global`)
 
+> `seoul/peering.tf` 의 `data.aws_vpc.ohio` 가 plan 단계에서 평가되므로, Ohio가 없는 상태에서 Seoul apply 시 plan 자체가 실패한다. **Seoul 1차 apply 전에 peering.tf를 임시로 비워야** 한다.
+
 ```powershell
-# 1. 서울 core (VPC·EKS·RDS·Secrets 등 — peering은 Ohio 없어 실패할 수 있으나 무시)
-cd seoul
+# 1. Seoul 1차 apply (peering.tf 임시 비우기)
+cp seoul/peering.tf seoul/peering.tf.bak
+"" | Out-File -Encoding ascii seoul/peering.tf
 aws eks update-kubeconfig --region ap-northeast-2 --name seoul-cluster --profile siseon
-terraform apply -auto-approve
+terraform -chdir=seoul apply -auto-approve
 
-# 2. 오하이오 (Seoul remote state 참조 → Seoul이 먼저 있어야 함)
-cd ..\ohio
+# 2. Ohio apply (Seoul remote state 참조)
 aws eks update-kubeconfig --region us-east-2 --name ohio-cluster --profile siseon
-terraform apply -auto-approve
+terraform -chdir=ohio apply -auto-approve
 
-# 3. 서울 재실행 (Ohio VPC 생성 후 peering.tf 성공 → 피어링 + 라우트 생성)
-cd ..\seoul
-terraform apply -auto-approve
+# 3. peering.tf 복원 + Ohio RT ID 업데이트
+cp seoul/peering.tf.bak seoul/peering.tf; rm seoul/peering.tf.bak
+# ohio_private_rt_ids 새 RT ID 확인:
+aws ec2 describe-route-tables --region us-east-2 --profile siseon `
+  --filters "Name=tag:Name,Values=ohio-priv-app-rt,ohio-priv-db-rt,ohio-pub-rt" `
+  --query "RouteTables[*].[RouteTableId,Tags[?Key=='Name'].Value|[0]]" --output text
+# → seoul/peering.tf 의 ohio_private_rt_ids 를 위 ID로 갱신 후:
+terraform -chdir=seoul apply -auto-approve
 
-# 4. 글로벌 (GA + Route53 A + CloudFront/S3 + CloudFront ACM)
-cd ..\global
-terraform apply -auto-approve
+# 4. Global apply (GA + Route53 A + CloudFront/S3 + CloudFront ACM)
+terraform -chdir=global apply -auto-approve
+
+# 5. ArgoCD Application 등록 (EKS 재생성 시마다 필요)
+kubectl apply -f C:\KJW\Team_Project\Stockops-GitOps\argocd\stockops-seoul-application.yaml `
+  --context arn:aws:eks:ap-northeast-2:448768137813:cluster/seoul-cluster
+kubectl apply -f C:\KJW\Team_Project\Stockops-GitOps\argocd\stockops-ohio-application.yaml `
+  --context arn:aws:eks:us-east-2:448768137813:cluster/ohio-cluster
 ```
 
 #### Seoul 살아있는 상태에서 Ohio만 재구축
@@ -344,33 +362,22 @@ INSERT INTO sensor_devices (
 > `kubectl run psql-temp -n stockops --rm -it --restart=Never --image=postgres:16-alpine -- sh`
 > 등록 후 로그에 `Skipping telemetry ... unknown sensor topic` 이 해당 토픽에 대해 사라지면 정상.
 
-### 애플리케이션 배포 (GitHub Actions)
-```
-<pull>
-cd C:\KJW\combined-repo
+### 애플리케이션 배포 (GitHub Actions + ArgoCD GitOps)
+
+```powershell
+# 서브모듈 포인터 갱신 후 push → deploy.yml 자동 트리거
+cd C:\KJW\Team_Project\Stockops-Application
 git submodule update --remote --merge
 git add .
 git commit -m "Sync submodules to latest"
 git push
 
-<push>
-cd C:\KJW\combined-repo\sensimul
-git add .
-git commit -m "feat: 뭔가 수정"
-git push origin main
-
-cd C:\KJW\combined-repo
-git add sensimul
-git commit -m "Update sensimul submodule pointer"
-git push origin main
-```
-
-```powershell
+# 또는 수동 트리거
 gh workflow run deploy.yml
 ```
 
 - 정적(client/admin): Vite 빌드 → S3 sync → CloudFront 무효화
-- 동적(api/ai): 이미지 빌드 → 서울+오하이오 ECR 직접 push(OIDC) → `kubectl rollout restart`
+- 동적(api/ai): 이미지 빌드 → 서울+오하이오 ECR 직접 push(OIDC) → Stockops-GitOps `kustomization.yaml` 이미지 태그 업데이트 commit → ArgoCD 자동 sync
 
 ### 검증
 
@@ -450,17 +457,17 @@ terraform destroy -auto-approve
 
 ### Apply 후 ArgoCD Application 등록
 
-EKS 클러스터를 새로 만든 뒤에는 ArgoCD가 설치되지만 Application은 자동 등록되지 않는다. 수동으로 적용해야 한다.
+EKS 클러스터를 새로 만든 뒤에는 ArgoCD가 설치되지만 Application은 자동 등록되지 않는다. Terraform apply 완료 후 수동으로 적용해야 한다(전체 신규 구축 5번 참조).
 
 ```powershell
-# Seoul
 kubectl apply -f "C:\KJW\Team_Project\Stockops-GitOps\argocd\stockops-seoul-application.yaml" `
   --context arn:aws:eks:ap-northeast-2:448768137813:cluster/seoul-cluster
-
-# Ohio
-aws eks update-kubeconfig --name ohio-cluster --region us-east-2 --profile siseon
 kubectl apply -f "C:\KJW\Team_Project\Stockops-GitOps\argocd\stockops-ohio-application.yaml" `
   --context arn:aws:eks:us-east-2:448768137813:cluster/ohio-cluster
+
+# 등록 확인
+kubectl get application -n argocd --context arn:aws:eks:ap-northeast-2:448768137813:cluster/seoul-cluster
+kubectl get application -n argocd --context arn:aws:eks:us-east-2:448768137813:cluster/ohio-cluster
 ```
 
 ### destroy 후 잔재 확인
@@ -516,7 +523,7 @@ Invoke-WebRequest -Uri "https://www.amazontrust.com/repository/AmazonRootCA1.pem
 - [x] WAF — ALB/GA/CloudFront 앞단 보안
 - [x] **api-server SQS 컨슈머 → Redis → 웹 실시간 표시 E2E 완성** (env+IRSA+sts+JSON매핑+센서등록) ✨ 2026-06-15
 - [x] **팀원 SSO 권한셋 aws-auth 매핑** (kubectl/ArgoCD 공동 작업)
-- [x] ArgoCD 앱 구성 (GitOps CD)
-- [ ] AI 기능 활성화 (Bedrock/Gemini/Vertex 중 택1 — 제공자 기본 비활성, Model Access + IRSA/키 필요. 비용 절감 위해 별도 프리티어 계정 크로스어카운트 검토 중)
+- [x] ArgoCD 앱 구성 (GitOps CD) — 서울/오하이오 독립 설치, Stockops-GitOps 연동, 자동 sync 완성 ✨ 2026-06-18
+- [x] AI 기능 활성화 (`STOCKOPS_BEDROCK_ENABLED=true`, 서울/오하이오 공통) ✨ 2026-06-18
 
 자세한 아키텍처는 `ARCHITECTURE.md`, AWS 리소스 목록은 `AWS_RESOURCES.md` 참고.
