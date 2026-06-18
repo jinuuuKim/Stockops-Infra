@@ -41,3 +41,23 @@ output "stockops_secret_arn" {
   description = "커스텀 시크릿(JWT) ARN — ohio cross-region 참조용"
   value       = aws_secretsmanager_secret.stockops.arn
 }
+
+output "vpc_id" {
+  description = "서울 VPC ID (peering 모듈 참조용)"
+  value       = module.seoul_vpc.vpc_id
+}
+
+output "pub_rt_id" {
+  description = "서울 퍼블릭 RT ID (peering 모듈 참조용)"
+  value       = module.seoul_vpc.pub_rt_id
+}
+
+output "priv_app_rt_id" {
+  description = "서울 프라이빗 앱 RT ID (peering 모듈 참조용)"
+  value       = module.seoul_vpc.priv_app_rt_id
+}
+
+output "priv_db_rt_id" {
+  description = "서울 프라이빗 DB RT ID (peering 모듈 참조용)"
+  value       = module.seoul_vpc.priv_db_rt_id
+}

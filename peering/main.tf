@@ -1,24 +1,52 @@
 # ==========================================================================
 # 서울 ↔ 오하이오 VPC 피어링 (크로스 리전)
 # Seoul: ap-northeast-2 (10.0.0.0/16) ↔ Ohio: us-east-2 (10.1.0.0/16)
-# 피어링 연결·수락·양방향 라우트 전부 Seoul state에서 관리 (ohio alias 활용)
+#
+# Seoul/Ohio state를 terraform_remote_state로 읽어 VPC ID·RT ID를 참조.
+# 하드코딩 없이 VPC 재생성 시 자동 갱신. 순환 참조 없음.
+# Apply 순서: seoul → ohio → peering
+# Destroy 순서: peering → ohio → seoul
 # ==========================================================================
 
-# ── Ohio VPC 조회 ──────────────────────────────────────────────────────────
-
-data "aws_vpc" "ohio" {
-  provider = aws.ohio
-  filter {
-    name   = "tag:Name"
-    values = ["ohio-vpc"]
+data "terraform_remote_state" "seoul" {
+  backend = "s3"
+  config = {
+    bucket  = "siseon-terraform-state"
+    key     = "infra/seoul/terraform.tfstate"
+    region  = "ap-northeast-2"
+    profile = "siseon"
   }
+}
+
+data "terraform_remote_state" "ohio" {
+  backend = "s3"
+  config = {
+    bucket  = "siseon-terraform-state"
+    key     = "infra/ohio/terraform.tfstate"
+    region  = "ap-northeast-2"
+    profile = "siseon"
+  }
+}
+
+locals {
+  seoul_rt_ids = toset([
+    data.terraform_remote_state.seoul.outputs.pub_rt_id,
+    data.terraform_remote_state.seoul.outputs.priv_app_rt_id,
+    data.terraform_remote_state.seoul.outputs.priv_db_rt_id,
+  ])
+
+  ohio_rt_ids = toset([
+    data.terraform_remote_state.ohio.outputs.pub_rt_id,
+    data.terraform_remote_state.ohio.outputs.priv_app_rt_id,
+    data.terraform_remote_state.ohio.outputs.priv_db_rt_id,
+  ])
 }
 
 # ── 피어링 연결 요청 (Seoul → Ohio) ───────────────────────────────────────
 
 resource "aws_vpc_peering_connection" "seoul_to_ohio" {
-  vpc_id      = module.seoul_vpc.vpc_id
-  peer_vpc_id = data.aws_vpc.ohio.id
+  vpc_id      = data.terraform_remote_state.seoul.outputs.vpc_id
+  peer_vpc_id = data.terraform_remote_state.ohio.outputs.vpc_id
   peer_region = "us-east-2"
   auto_accept = false
 
@@ -64,17 +92,7 @@ resource "aws_vpc_peering_connection_options" "ohio" {
   depends_on = [aws_vpc_peering_connection_accepter.ohio]
 }
 
-# ── Seoul 라우팅 테이블 → Ohio CIDR (10.1.0.0/16) ─────────────────────────
-# 모듈 output 참조 → VPC 재생성 시에도 RT ID가 자동 갱신됨
-# pub_rt: Grafana 등 퍼블릭 경유 트래픽 대비, priv_app_rt: 워커노드, priv_db_rt: RDS
-
-locals {
-  seoul_rt_ids = toset([
-    module.seoul_vpc.pub_rt_id,
-    module.seoul_vpc.priv_app_rt_id,
-    module.seoul_vpc.priv_db_rt_id,
-  ])
-}
+# ── Seoul 라우팅 테이블 → Ohio CIDR ───────────────────────────────────────
 
 resource "aws_route" "seoul_to_ohio" {
   for_each = local.seoul_rt_ids
@@ -85,21 +103,10 @@ resource "aws_route" "seoul_to_ohio" {
   depends_on                = [aws_vpc_peering_connection_accepter.ohio]
 }
 
-# ── Ohio 라우팅 테이블 → Seoul CIDR (10.0.0.0/16) — 직접 ID 지정 ──────────
-# rtb-0e74d86642a7e5e9f: ohio-priv-app-rt
-# rtb-0c591d6d25402a829: ohio-priv-db-rt
-# rtb-02632a739f7092f67: ohio-pub-rt
-
-locals {
-  ohio_private_rt_ids = toset([
-    "rtb-0e74d86642a7e5e9f",
-    "rtb-0c591d6d25402a829",
-    "rtb-02632a739f7092f67",
-  ])
-}
+# ── Ohio 라우팅 테이블 → Seoul CIDR ───────────────────────────────────────
 
 resource "aws_route" "ohio_to_seoul" {
-  for_each = local.ohio_private_rt_ids
+  for_each = local.ohio_rt_ids
 
   provider                  = aws.ohio
   route_table_id            = each.value
