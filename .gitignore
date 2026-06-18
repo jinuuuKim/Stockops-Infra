@@ -9,3 +9,4 @@ terraform.rc
 *.pem
 *.key
 .claude/
+CLAUDE.md
