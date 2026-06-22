@@ -1,100 +1,88 @@
-# 🛒 StockOps - 식품 ERP 멀티 클라우드 인프라
+# StockOps — 식품 ERP 멀티 리전 클라우드 인프라
 
-![Terraform](https://img.shields.io/badge/terraform-%235835CC.svg?style=for-the-badge&logo=terraform&logoColor=white)
+![Terraform](https://img.shields.io/badge/Terraform-%235835CC.svg?style=for-the-badge&logo=terraform&logoColor=white)
 ![AWS](https://img.shields.io/badge/AWS-%23FF9900.svg?style=for-the-badge&logo=amazon-aws&logoColor=white)
-![Kubernetes](https://img.shields.io/badge/kubernetes-%23326ce5.svg?style=for-the-badge&logo=kubernetes&logoColor=white)
-![CloudFront](https://img.shields.io/badge/CloudFront-%23A166FF.svg?style=for-the-badge&logo=amazon-aws&logoColor=white)
+![Kubernetes](https://img.shields.io/badge/Kubernetes-%23326ce5.svg?style=for-the-badge&logo=kubernetes&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-%23316192.svg?style=for-the-badge&logo=postgresql&logoColor=white)
-![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
-![GitHub Actions](https://img.shields.io/badge/github%20actions-%232088FF.svg?style=for-the-badge&logo=githubactions&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-%232088FF.svg?style=for-the-badge&logo=githubactions&logoColor=white)
 
-> **팀명**: 시선 (SysSun — System Surveillance & Unified Network)
+> **팀명**: 시선 (SysSun — System Surveillance & Unified Network)  
 > **주제**: AX 환경을 위한 ERP 솔루션 기반 멀티 하이브리드 클라우드 인프라 자동화 및 Observability 체계 구축
 
-StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS 솔루션이다. 서울 본사가 운영을 총괄하고 미국 영업팀이 현지 영업을 지원하며, 멀티 리전·하이브리드 클라우드 위에서 동작한다.
+K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS 솔루션 StockOps의 AWS 멀티 리전 인프라 레포입니다. 서울 본사와 미국 오하이오 영업팀이 독립적인 리전에서 동작하며, Terraform IaC로 전체 인프라를 코드로 관리합니다.
 
-> **도메인**: `siseon.live`
-> **정적 프론트(client/admin)는 CloudFront + S3, 동적 API/WS/AI는 Global Accelerator → ALB → EKS 의 "공존(coexistence) 구조"** 로 분리되어 있다.
-
----
-
-## 시나리오
-
-- **AWS 서울**: 본사. 한국 사용자 대상 메인 서비스 (풀스택)
-- **AWS 오하이오**: 미국 영업팀 대상 서비스 (멀티 리전 풀스택 미러)
-- **온프레미스(한국)**: 센터/창고. 센서 데이터 수집
-- **Azure 서울**: 백업 데이터 + 상시 로그 저장 (재해 복구용, 예정)
-
-**데이터**: 3단계 방어 — Multi-AZ(1차) + Cross-Region Replica(2차) + Azure 백업(3차, 예정)
-**트래픽**: 정적은 CloudFront 엣지 캐시, 동적은 Global Accelerator 지연 기반 라우팅(한국→서울, 미국→오하이오) + 리전 장애 시 페일오버
-**보안**: 미국 영업팀은 최소 권한으로 앱/DB 접근 (본사 영향 차단), S3는 OAC 전용(퍼블릭 차단)
-
-> ### 📌 현재 배포 상태
-> - **서울 + 오하이오 멀티 리전 + 글로벌(CloudFront/GA/Route53)** 전체 가동 중. 도메인 연결·CORS·정적 프론트 전환까지 검증 완료.
-> - **IoT 센서 → SQS → api-server → Redis → 웹 실시간 표시 경로 E2E 검증 완료** (2026-06-15). 도어 센서 20개 + 온도 센서 1개 실데이터 표시 확인.
-> - **GitOps CD 완성** (2026-06-18) — ArgoCD(서울/오하이오 독립 설치) + Stockops-GitOps 레포 연동. GitHub Actions가 ECR push + GitOps manifest 업데이트 → ArgoCD 자동 sync.
-> - **AI 기능 활성화** — `STOCKOPS_BEDROCK_ENABLED=true` (서울/오하이오 공통 적용).
-> - **디렉토리 구조 정리** (2026-06-18) — `seoul/ohio/global` → `regions/` 하위로 이동. `peering/`은 cross-region root로 루트에 유지.
+> **도메인**: `siseon.live`  
+> 정적 프론트(client/admin)는 **CloudFront + S3**, 동적 API/WS/AI는 **Global Accelerator → ALB → EKS** 의 공존 구조로 분리되어 있습니다.
 
 ---
 
 ## 레포 구성
 
-| 레포 | 내용 |
+| 레포 | 설명 |
 |------|------|
-| **Stockops-Infra** | Terraform IaC (modules + regions/{seoul,ohio,global} + peering, state 분리) |
-| **Stockops-Application** | 앱 모노레포 (포크 서브모듈: admin-web, ai-module, api-server, client-web, sensimul) + GitHub Actions |
-| **Stockops-GitOps** | ArgoCD용 K8s manifest (kustomize 기반, 서울/오하이오 overlay 분리) |
-
-> `Stockops-Application` 은 각 앱을 **git submodule(포크)** 로 둔다. 커밋 순서: 서브모듈 내부 commit/push → 부모에서 `git add <submodule>` 로 포인터 갱신 → push 가 `deploy.yml` 트리거.
-> `Stockops-GitOps` 는 GitHub Actions가 이미지 태그를 업데이트하면 ArgoCD가 감지해서 클러스터에 자동 sync한다. 환경변수·리소스 설정 변경은 이 레포에서 직접 수정.
-
-### 애플리케이션 컴포넌트
-
-| 컴포넌트 | 기술 | 포트 | 서빙 경로 |
-|----------|------|------|-----------|
-| client-web | React (Vite 정적 빌드) | — | `siseon.live` → CloudFront → S3 |
-| admin-web | React (Vite 정적 빌드) | — | `app.siseon.live` → CloudFront → S3 |
-| api-server | Spring Boot 3.2 / Java 21 | 8080 | `api.siseon.live` → GA → ALB (`/api/*`, `/ws/*`) |
-| ai-module | FastAPI | 8000 | `api.siseon.live` → GA → ALB (`/ai/*`) |
-| sensimul | Go 1.23+ | — | 온프레미스 IoT 시뮬레이터 |
-
-> client-web / admin-web 은 더 이상 nginx 컨테이너로 EKS 에 뜨지 않는다. **정적 자산만 S3 에 올리고 CloudFront 가 서빙**한다.
+| **[Stockops-Infra](https://github.com/jinuuuKim/Stockops-Infra)** | Terraform IaC — 현재 레포 |
+| **[Stockops-Application](https://github.com/jinuuuKim/Stockops-Application)** | 앱 모노레포 (api-server, ai-module, client-web, admin-web, sensimul) + GitHub Actions CI/CD |
+| **[Stockops-GitOps](https://github.com/jinuuuKim/Stockops-GitOps)** | ArgoCD용 K8s manifest (Kustomize 기반, 서울/오하이오 overlay 분리) |
 
 ---
 
-## 아키텍처 — 공존 구조 (정적/동적 분리)
+## 시나리오
+
+| 환경 | 역할 |
+|------|------|
+| AWS 서울 (`ap-northeast-2`) | 본사. 한국 사용자 대상 메인 서비스 (풀스택) |
+| AWS 오하이오 (`us-east-2`) | 미국 영업팀 대상 서비스 (멀티 리전 풀스택 미러) |
+| 온프레미스 (한국) | 물류 센터·창고. MQTT 센서 데이터 수집 |
+
+- **데이터**: Multi-AZ(1차) + Cross-Region Read Replica(2차) 3단계 방어
+- **트래픽**: 정적은 CloudFront 엣지 캐시, 동적은 Global Accelerator 지연 기반 라우팅 (한국→서울, 미국→오하이오) + 리전 장애 시 자동 페일오버
+- **보안**: 미국 영업팀은 최소 권한으로 앱·DB 접근, S3는 OAC 전용 (퍼블릭 차단)
+
+---
+
+## 아키텍처
 
 ```
-        [한국 사용자]                         [미국 사용자]
-             │                                     │
-   ┌─────────┴──────────┐              ┌───────────┴─────────┐
-   │정적                 │동적          │동적                  │정적
-   ▼                    ▼              ▼                     ▼
- siseon.live /           api.siseon.live                   (동일)
- app.siseon.live                │
-   │                            ▼
-   ▼                   Global Accelerator
- CloudFront   (지연 라우팅 + 페일오버, 진짜 클라이언트 IP 인식)
- (OAC, 엣지캐시)          │        │
-   │             ┌───────┘        └────────┐
-   ▼             ▼                          ▼
-  S3         서울 ALB                   오하이오 ALB
-(정적자산)    (HTTPS 443)               (HTTPS 443)
-           /api /ws → spring          /api /ws → spring
-           /ai      → fastapi         /ai      → fastapi
-           default  → 404(fixed)      default  → 404(fixed)
-                │                          │
-            서울 EKS                   오하이오 EKS
-         (api / ai / redis)          (api / ai / redis)
-                │                          │
-         서울 RDS (Master) ──────────→ 오하이오 RDS (Read Replica)
-         읽기/쓰기                      읽기 / 쓰기는 서울로
+        [한국 사용자]                          [미국 사용자]
+              │                                      │
+   ┌──────────┴──────────┐              ┌────────────┴──────────┐
+   │ 정적                │ 동적          │ 동적                  │ 정적
+   ▼                     ▼              ▼                       ▼
+siseon.live /         api.siseon.live                       (동일)
+app.siseon.live              │
+   │                         ▼
+   ▼                Global Accelerator
+CloudFront            (지연 라우팅 + 페일오버)
+(OAC, 엣지캐시)            │         │
+   │              ┌────────┘         └────────┐
+   ▼              ▼                            ▼
+  S3          서울 ALB                    오하이오 ALB
+(정적 자산)    (HTTPS 443)                (HTTPS 443)
+            /api /ws → api-server       /api /ws → api-server
+            /ai      → ai-module        /ai      → ai-module
+            default  → 404             default  → 404
+                 │                           │
+             서울 EKS                    오하이오 EKS
+          (api / ai / redis)           (api / ai / redis)
+                 │                           │
+          서울 RDS (Primary) ─────────→ 오하이오 RDS (Read Replica)
 ```
 
-- **정적(`siseon.live`, `app.siseon.live`)**: CloudFront → S3(OAC). API behavior 없음(순수 정적). SPA 라우팅은 403/404 → `index.html` 폴백.
-- **동적(`api.siseon.live`)**: CloudFront 를 거치지 않고 GA 로만 흐른다 → GA 가 진짜 클라이언트 IP 를 인식 → 한국=서울 / 미국=오하이오 지연 라우팅 유지.
-- 평상시: 한국 → 서울, 미국 → 오하이오 / 서울 장애 시: 한국 트래픽도 오하이오로 페일오버 + 오하이오 RDS Promote.
+- **정적 (`siseon.live`, `app.siseon.live`)**: CloudFront → S3(OAC). SPA 라우팅은 403/404 → `index.html` 폴백.
+- **동적 (`api.siseon.live`)**: CloudFront 없이 GA 직접 → 실제 클라이언트 IP 기반 지연 라우팅 유지.
+- 서울 장애 시: 한국 트래픽도 오하이오로 페일오버 + RDS Promote.
+
+---
+
+## 애플리케이션 컴포넌트
+
+| 컴포넌트 | 기술 | 포트 | 서빙 경로 |
+|----------|------|------|-----------|
+| client-web | React + Vite | — | `siseon.live` → CloudFront → S3 |
+| admin-web | React + Vite | — | `app.siseon.live` → CloudFront → S3 |
+| api-server | Spring Boot 3.2 / Java 21 | 8080 | `api.siseon.live` → GA → ALB (`/api/*`, `/ws/*`) |
+| ai-module | FastAPI | 8000 | `api.siseon.live` → GA → ALB (`/ai/*`) |
+| sensimul | Go 1.23+ | — | 온프레미스 IoT 센서 시뮬레이터 |
 
 ---
 
@@ -102,13 +90,13 @@ StockOps는 K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS
 
 ```
 Stockops-Infra/
-├── modules/                 # 공통 모듈 (vpc, alb, eks, db, ecr, github-oidc, iot, karpenter)
+├── modules/          # 재사용 모듈 (vpc, alb, eks, db, ecr, github-oidc, iot, karpenter)
 ├── regions/
-│   ├── seoul/               # 서울 리전 (본사, 풀스택) + Route53 호스팅 존 + 서울 ACM(ALB용)
-│   ├── ohio/                # 오하이오 리전 (미국, 풀스택 미러) + 오하이오 ACM
-│   └── global/              # Global Accelerator + Route53 A 레코드 + CloudFront/S3(OAC) + CloudFront ACM(us-east-1)
-├── peering/                 # Seoul ↔ Ohio VPC 피어링 (remote_state로 양쪽 VPC ID·RT ID 참조, 하드코딩 없음)
-└── bootstrap/               # S3 backend 버킷 + KMS 키 초기 생성
+│   ├── seoul/        # 서울 리전 — VPC·EKS·RDS·IoT + Route53 호스팅 존 + ACM(ALB용)
+│   ├── ohio/         # 오하이오 리전 — VPC·EKS·RDS(Replica) + ACM(ALB용)
+│   └── global/       # Global Accelerator · Route53 A 레코드 · CloudFront/S3(OAC) · ACM(us-east-1)
+├── peering/          # Seoul ↔ Ohio VPC 피어링 (remote_state로 VPC ID·RT ID 참조, 하드코딩 없음)
+└── bootstrap/        # S3 backend 버킷 + KMS 키 초기 생성
 ```
 
 ### Terraform State 구조 (S3 backend)
@@ -116,26 +104,26 @@ Stockops-Infra/
 ```
 siseon-terraform-state/
 └── infra/
-    ├── seoul/terraform.tfstate     # Route53 호스팅 존 소유  (regions/seoul/)
-    ├── ohio/terraform.tfstate      #                          (regions/ohio/)
-    ├── peering/terraform.tfstate   # VPC Peering + 양방향 Route (peering/)
-    └── global/terraform.tfstate    #                          (regions/global/)
+    ├── seoul/terraform.tfstate     # Route53 호스팅 존 소유
+    ├── ohio/terraform.tfstate
+    ├── peering/terraform.tfstate   # VPC Peering + 양방향 Route
+    └── global/terraform.tfstate
 ```
 
-### DNS / 인증서 관리 구조
+### DNS / 인증서 관리
 
 ```
-regions/seoul/dns.tf   → Route53 호스팅 존 + 서울 ACM (ap-northeast-2, ALB HTTPS용)
-regions/ohio/dns.tf    → 오하이오 ACM (us-east-2, ALB HTTPS용)
-regions/global/acm.tf  → CloudFront ACM (us-east-1, siseon.live + *.siseon.live) ※ CloudFront는 us-east-1 인증서만 허용
-regions/global/dns.tf  → Route53 A 레코드:
-                   siseon.live      → CloudFront(client)
-                   app.siseon.live  → CloudFront(admin)
-                   api.siseon.live  → Global Accelerator
+regions/seoul/   → Route53 호스팅 존 + ACM (ap-northeast-2, ALB HTTPS용)
+regions/ohio/    → ACM (us-east-2, ALB HTTPS용)
+regions/global/  → ACM (us-east-1, *.siseon.live, CloudFront 전용)
+                   Route53 A 레코드:
+                     siseon.live     → CloudFront (client)
+                     app.siseon.live → CloudFront (admin)
+                     api.siseon.live → Global Accelerator
 ```
 
-> Route53 호스팅 존은 서울(본사) state 가 소유. 오하이오/글로벌은 `terraform_remote_state` 로 zone_id 참조.
-> 도메인 NS 는 등록기관(가비아)에서 Route53 위임 세트로 교체.
+> Route53 호스팅 존은 서울 state가 소유. 오하이오/글로벌은 `terraform_remote_state`로 zone_id 참조.  
+> 도메인 NS는 등록기관(가비아)에서 Route53 위임 세트로 교체.
 
 ---
 
@@ -145,17 +133,16 @@ regions/global/dns.tf  → Route53 A 레코드:
 |--------|------|----------|--------|
 | VPC | 10.0.0.0/16 | 10.1.0.0/16 | — |
 | EKS | seoul-cluster v1.30 | ohio-cluster v1.30 | — |
-| 노드 오토스케일 | Karpenter + HPA (metrics-server 포함) | Karpenter + HPA (metrics-server 포함) | — |
-| ALB | HTTPS + 경로 라우팅 (api/ws/ai) | 동일 | — |
-| RDS | PostgreSQL 18.4 (Master) | Read Replica | — |
-| ECR | 2개 리포 (api, ai) | 2개 리포 (api, ai) — 리전별 독립 | — |
-| ACM | siseon.live (ALB, ap-northeast-2) | siseon.live (ALB, us-east-2) | siseon.live + *.siseon.live (CloudFront, us-east-1) |
-| IoT Core + SQS + Firehose | ✅ | (SQS/IRSA 준비됨, Rule failover용) | — |
+| 노드 오토스케일 | Karpenter + HPA | Karpenter + HPA | — |
+| ALB | HTTPS + 경로 라우팅 | 동일 | — |
+| RDS | PostgreSQL 18.4 (Primary) | Read Replica | — |
+| ECR | stockops-api, stockops-ai | stockops-api, stockops-ai | — |
+| ACM | siseon.live (ALB) | siseon.live (ALB) | *.siseon.live (CloudFront) |
+| IoT Core + SQS + Firehose | ✅ | — | — |
 | Secrets Manager + ESO | ✅ | ✅ | — |
 | Route53 호스팅 존 | ✅ (소유) | — | A 레코드 |
 | CloudFront + S3 (정적 프론트) | — | — | client / admin (OAC) |
-| Global Accelerator | — | — | HTTP/HTTPS 리스너, 서울/오하이오 ALB 엔드포인트 |
-| api-server SQS 컨슈머 IRSA | ✅ (`stockops-api-sqs-role` + `stockops-api-sa`) | ✅ (`stockops-api-sqs-role-ohio`) | — |
+| Global Accelerator | — | — | HTTP/HTTPS, 서울/오하이오 ALB 엔드포인트 |
 
 ---
 
@@ -164,58 +151,30 @@ regions/global/dns.tf  → Route53 A 레코드:
 | Priority | 조건 | 대상 |
 |----------|------|------|
 | 5 | `/ws`, `/ws/*` | api-server (WebSocket / STOMP) |
-| 10 | `/api`, `/api/*` | api-server (spring_tg) |
-| 20 | `/ai`, `/ai/*` | ai-module (fastapi_tg) |
-| default | 나머지 | **fixed-response 404** |
+| 10 | `/api`, `/api/*` | api-server |
+| 20 | `/ai`, `/ai/*` | ai-module |
+| default | 나머지 | fixed-response 404 |
 
-> HTTP(80) → HTTPS(301) 리다이렉트.
-> 정적 프론트(client/admin)가 CloudFront/S3 로 이전되면서 **frontend_tg / admin_tg 타깃 그룹과 admin 호스트 룰(p85)은 제거**됨. ALB 에 남는 타깃 그룹은 `spring_tg` / `fastapi_tg` 둘뿐.
-> ⚠️ GA 는 ALB 엔드포인트의 헬스를 **ALB 타깃 그룹 상태**로 판정한다(엔드포인트 그룹의 health_check_path 는 ALB 엔드포인트엔 무시됨). 따라서 `spring_tg`·`fastapi_tg` 가 **모두 healthy** 해야 GA 가 해당 ALB 를 healthy 로 본다.
-
----
-
-## CORS
-
-```
-STOCKOPS_CORS_ALLOWED_ORIGINS = "https://app.siseon.live,https://siseon.live"
-```
-
-> 이 env var **하나로 REST CORS + STOMP WebSocket 오리진이 동시에 제어**된다(`CorsConfig` + `WebSocketConfig` 가 같은 프로퍼티 참조). OS env var 가 `application.yml`/프로파일보다 우선순위가 높다.
-> refresh 쿠키: `HttpOnly` + `Secure` + `SameSite=Strict`, Path `/api/v1/auth`. `app/api.siseon.live` 는 eTLD+1 이 같아 same-site → Strict 로도 정상 전송.
+> HTTP(80) → HTTPS(301) 리다이렉트.  
+> GA는 `spring_tg`·`fastapi_tg` **모두 healthy** 여야 해당 ALB를 healthy로 판정합니다.
 
 ---
 
-## IoT 센서 파이프라인 (팬아웃)
+## IoT 센서 파이프라인
 
 ```
 온프레미스 센서 (sensormqtt.ithans.com)
     └─ Mosquitto 브리지 (TLS:8883)
          └─ AWS IoT Core (sensimul/sites/+/sensors/+)
-              └─ IoT Rule ─┬─→ SQS (실시간: api-server 소비 → Redis 캐시 → 웹 표시 / WebSocket 푸시)
-                           └─→ Kinesis Firehose → S3 (GZIP, 날짜 파티션 year/month/day, 15분 버퍼 → Athena 분석)
+              └─ IoT Rule ─┬─→ SQS → api-server → Redis → 웹 실시간 표시 / WebSocket 푸시
+                           └─→ Kinesis Firehose → S3 (GZIP, 날짜 파티션) → Athena 분석
 ```
 
-- IoT Thing: `mosquitto-bridge` / 서울 엔드포인트: `a2ie1b3xp2emgi-ats.iot.ap-northeast-2.amazonaws.com`
-- 현장/센서: `TEST_INDOOR_01`(테스트) 외에 운영 센터 `CT-SEL / CT-ICN / CT-PUS / CT-DAE / CT-GWJ` 의 DOOR/온습도/공기질 센서가 실시간 발행 중
-- 센서 메시지 포맷: snake_case JSON (`site_id`, `sensor_id`, `sensor_type`, `value` ...)
-
-> destroy/재apply 시 IoT 인증서 새로 발급 → 온프레미스 브리지 재설정 필요.
-
-### ✅ SQS 컨슈머 → 실시간 표시 경로 (2026-06-15 E2E 완성)
-
-`api-server` 가 SQS 큐(`stockops-sensor-data`)를 폴링해 센서 텔레메트리를 소비하고, `sensor_devices` 등록 정보와 매칭한 뒤 Redis 캐시에 적재 → 웹이 `/sensors/{id}/readings/recent` 로 조회하는 경로를 끝까지 검증했다. 동작에 필요했던 5개 선결 조건:
-
-| # | 구분 | 항목 | 조치 |
-|---|------|------|------|
-| 1 | 인프라 (env) | SQS ingestion 미활성 | `STOCKOPS_SQS_INGESTION_ENABLED=true` + `STOCKOPS_SQS_INGESTION_QUEUE_URL` + `STOCKOPS_SQS_INGESTION_REGION` 주입 (seoul/kubernetes.tf) |
-| 2 | 인프라 (IRSA) | api-server 파드에 SQS 읽기 권한 없음 | `stockops-api-sqs-role`(IRSA) + `stockops-api-sa` SA 생성·연결, `sqs:ReceiveMessage/DeleteMessage/...` 부여 (seoul/iot.tf) |
-| 3 | 앱 (pom.xml) | AWS SDK `sts` 모듈 누락 → IRSA 토큰 발급 실패(`Unexpected SQS ingestion failure`) | `software.amazon.awssdk:sts` 의존성 추가 |
-| 4 | 앱 (코드) | 센서 JSON(snake_case) ↔ DTO(camelCase) 필드명 불일치로 `siteId/sensorId` 가 null → `Skipping malformed` | `SensimulPayload` 6개 필드에 `@JsonProperty("site_id")` 등 매핑 추가 |
-| 5 | DB (시드) | `sensor_devices` 미등록 → `findByMqttTopic` 매칭 실패로 전량 drop | DOOR 센서 20개(5센터 × 4) + 온도 센서 1개(`CT-SEL-FRZ-T01`) 등록 |
-
-> mqtt_topic 매칭 규칙: `sensimul/sites/{site_id}/sensors/{sensor_id}`. `sensor_devices.mqtt_topic` 와 정확히 일치해야 ingest 된다.
-> 등록 안 된 토픽은 `Skipping telemetry for unknown or deleted sensor topic` 로그를 남기고 버려진다(에러 아님).
-> 검증: SQS 큐 backlog 136k → 14건으로 정상 소비 확인, Redis `stockops:sensor:readings:1~20` 키 생성 확인.
+- IoT Thing: `mosquitto-bridge`
+- 서울 엔드포인트: `a2ie1b3xp2emgi-ats.iot.ap-northeast-2.amazonaws.com`
+- 운영 센터: `CT-SEL / CT-ICN / CT-PUS / CT-DAE / CT-GWJ` — DOOR·온습도·공기질 센서 실시간 발행
+- 센서 메시지 포맷: snake_case JSON (`site_id`, `sensor_id`, `sensor_type`, `value`, ...)
+- `sensor_devices.mqtt_topic`에 등록된 토픽만 ingest됩니다 (`sensimul/sites/{site_id}/sensors/{sensor_id}` 형식).
 
 ---
 
@@ -223,280 +182,147 @@ STOCKOPS_CORS_ALLOWED_ORIGINS = "https://app.siseon.live,https://siseon.live"
 
 ```
 Secrets Manager (stockops/app)
-    └─ ClusterSecretStore (v1)
+    └─ ClusterSecretStore
          └─ ExternalSecret (1h 주기 동기화)
               └─ K8s Secret (stockops-secret) 자동 생성
-                   └─ 파드 환경변수 주입 (DB/JWT 등)
+                   └─ 파드 환경변수 주입
 ```
 
-> destroy/재apply 후 `stockops-secret` 수동 생성 불필요(ESO 자동 복구). apply 직후 `kubectl get secret stockops-secret -n stockops` 로 동기화 확인(없으면 api-server CrashLoopBackOff).
-
-> ⚠️ **보안 점검 항목(예정)**: 현재 `jwt_secret`/`db_password` 는 로컬 `terraform.tfvars` 평문 입력 → state(S3)에도 평문 저장된다. (1) `*.tfvars` `.gitignore` 확인, (2) 변수에 `sensitive = true`, (3) state 버킷 SSE + IAM 접근 제어, (4) 장기적으로 Secrets Manager data source 조회 / `random_password` / `ignore_changes` 패턴으로 전환 검토.
+> apply 직후 `kubectl get secret stockops-secret -n stockops`로 동기화 확인.
 
 ---
 
-## 팀 클러스터 접근 (aws-auth)
-
-- 팀원 4명은 IAM Identity Center(SSO) 권한셋 `AWSReservedSSO_AdministratorAccess` 사용.
-- `seoul/kubernetes.tf` 의 `aws-auth` ConfigMap `mapRoles` 에 해당 권한셋 role ARN 1건 매핑(`{{SessionName}}` 으로 4명 공통 커버) → kubectl/ArgoCD 작업 가능.
-
-```hcl
-{
-  rolearn  = "arn:aws:iam::448768137813:role/aws-reserved/sso.amazonaws.com/ap-northeast-2/AWSReservedSSO_AdministratorAccess_<hash>"
-  username = "sso-user:{{SessionName}}"
-  groups   = ["system:masters"]
-}
-```
-
-### ArgoCD 접근 (CD 작업용)
-
-ArgoCD 는 `ClusterIP` 로 떠 있어 외부 URL 이 없다. 포트포워딩으로 접근:
-
-```powershell
-kubectl port-forward svc/argocd-server -n argocd 8080:443
-# https://localhost:8080 / admin / (아래 초기 비밀번호)
-$b64 = kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}"
-[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))
-```
-
----
-
-## CI/CD
+## CI/CD 흐름
 
 ```
-GitHub Actions (CI/CD) — main push / workflow_dispatch
+GitHub Actions (Stockops-Application — main push)
 ├─ [정적] client-web / admin-web
-│    └─ Vite 빌드 (.env.production: VITE_API_BASE_URL=https://api.siseon.live/api)
-│         └─ aws s3 sync --delete  →  CloudFront create-invalidation
+│    └─ Vite 빌드 → S3 sync → CloudFront 캐시 무효화
 │
 └─ [동적] api-server / ai-module
-     └─ 이미지 빌드  →  서울 ECR + 오하이오 ECR 각각 직접 push (OIDC, 액세스 키 없음 / Option B)
-               └─ Stockops-GitOps kustomization.yaml 이미지 태그 업데이트 (Seoul + Ohio overlay)
-                        └─ ArgoCD 자동 감지 → 서울/오하이오 클러스터 각각 sync
+     └─ 이미지 빌드 → 서울 ECR + 오하이오 ECR 직접 push (OIDC)
+          └─ Stockops-GitOps kustomization.yaml 이미지 SHA 업데이트
+               └─ ArgoCD 자동 감지 → 서울/오하이오 클러스터 각각 sync
 
-ArgoCD (CD) — v7.7.0, 서울/오하이오 각 클러스터에 독립 설치
-  ├─ stockops-seoul Application → Stockops-GitOps/apps/stockops/seoul
-  └─ stockops-ohio  Application → Stockops-GitOps/apps/stockops/ohio
+ArgoCD — v7.7.0, 서울/오하이오 클러스터 독립 설치
+  ├─ stockops-seoul → Stockops-GitOps/apps/stockops/seoul
+  └─ stockops-ohio  → Stockops-GitOps/apps/stockops/ohio
 ```
 
-> ECR 은 리전별 독립 리포(서울/오하이오 각각 `stockops-api`/`stockops-ai`)이고, CI 가 양 리전에 **직접 push**한다(Option B). CRR(Cross-Region Replication)을 쓰지 않으므로 복제 지연 race 가 없고 리전별 롤백이 가능하다.
-> ArgoCD는 허브-스포크가 아닌 **각 클러스터 독립 설치** 방식. GitOps 저장소의 manifest 변경(GitHub Actions의 이미지 태그 업데이트 또는 직접 수정)을 감지해 자동 sync한다.
+> ECR은 리전별 독립 리포이며, CI가 양 리전에 직접 push합니다 (CRR 미사용 → 리전별 독립 롤백 가능).
 
 ---
 
 ## 배포 방법
 
 ### 사전 준비
-- AWS SSO 로그인 (`aws sso login --profile siseon`)
-- kubectl, terraform 설치
-- 각 리전 `terraform.tfvars` 생성 (jwt_secret, db_username, db_password)
-- 정적 프론트 S3 버킷(`siseon-frontend-client`, `siseon-frontend-admin`)은 사전 존재(글로벌이 `data` 로 참조)
-
-### 배포 순서
-
-> Apply 순서: `regions/seoul → regions/ohio → peering → regions/global`
-> Seoul/Ohio는 서로 독립. 둘 다 완료 후 peering apply. peering은 `terraform_remote_state`로 양쪽 VPC ID·RT ID를 자동 참조.
-
-#### 전체 신규 구축 (`regions/seoul → regions/ohio → peering → regions/global`)
 
 ```powershell
-# 1. Seoul apply
+# AWS SSO 로그인
+aws sso login --profile siseon
+
+# 각 리전 디렉토리에 terraform.tfvars 생성
+# 필요 변수: jwt_secret, db_username, db_password
+```
+
+### 전체 신규 구축
+
+Apply 순서: `seoul → ohio → peering → global`
+
+```powershell
+# 1. Seoul
 aws eks update-kubeconfig --region ap-northeast-2 --name seoul-cluster --profile siseon
 terraform -chdir=regions/seoul apply -auto-approve
 
-# 2. Ohio apply (Seoul remote state 참조)
+# 2. Ohio
 aws eks update-kubeconfig --region us-east-2 --name ohio-cluster --profile siseon
 terraform -chdir=regions/ohio apply -auto-approve
 
-# 3. Peering apply (Seoul/Ohio VPC ID·RT ID를 remote state에서 자동 참조)
+# 3. Peering (Seoul/Ohio VPC ID·RT ID를 remote state에서 자동 참조)
 terraform -chdir=peering apply -auto-approve
 
-# 4. Global apply (GA + Route53 A + CloudFront/S3 + CloudFront ACM)
+# 4. Global (GA + Route53 A 레코드 + CloudFront/S3 + ACM)
 terraform -chdir=regions/global apply -auto-approve
 
-# 5. ArgoCD Application 등록 (EKS 재생성 시마다 필요)
-kubectl apply -f C:\KJW\Team_Project\Stockops-GitOps\argocd\stockops-seoul-application.yaml `
+# 5. ArgoCD Application 등록 (EKS 신규 생성 시마다 필요)
+kubectl apply -f Stockops-GitOps/argocd/stockops-seoul-application.yaml \
   --context arn:aws:eks:ap-northeast-2:448768137813:cluster/seoul-cluster
-kubectl apply -f C:\KJW\Team_Project\Stockops-GitOps\argocd\stockops-ohio-application.yaml `
+kubectl apply -f Stockops-GitOps/argocd/stockops-ohio-application.yaml \
   --context arn:aws:eks:us-east-2:448768137813:cluster/ohio-cluster
 ```
 
-#### Seoul 살아있는 상태에서 Ohio만 재구축
+> Cross-Region RDS Replica 생성에 약 25분. ACM 검증은 NS 전파 후 자동 완료 (5~15분).
+
+### Ohio만 재구축 (Seoul 유지 상태)
 
 ```powershell
-# 1. Ohio apply
-aws eks update-kubeconfig --region us-east-2 --name ohio-cluster --profile siseon
 terraform -chdir=regions/ohio apply -auto-approve
-
-# 2. Peering apply (새 Ohio VPC ID·RT ID를 remote state에서 자동 감지 → 피어링 재연결)
-terraform -chdir=peering apply -auto-approve
-
-# 3. Global (이미 존재하면 no-op)
+terraform -chdir=peering apply -auto-approve   # 새 Ohio VPC ID·RT ID 자동 감지
 terraform -chdir=regions/global apply -auto-approve
 ```
-
-> Cross-Region Replica(오하이오 RDS) 생성에 약 25분. ACM 검증은 NS 전파 후 자동 완료(5~15분).
-
-### 센서 디바이스 등록 (실시간 표시 전제)
-
-api-server 가 SQS 데이터를 받아도 `sensor_devices` 에 등록된 토픽만 화면에 표시된다. RDS 에 직접 INSERT(또는 admin-web/`SensorDeviceController`):
-
-```sql
-INSERT INTO sensor_devices (
-    name, location, sensor_type, external_sensor_id, mqtt_topic,
-    unit, calibration, noise_sigma, warn_min, warn_max, crit_min, crit_max, deleted, active
-) VALUES (...);
--- mqtt_topic = 'sensimul/sites/{site_id}/sensors/{sensor_id}' 형식 필수
-```
-
-> 로컬에 psql 미설치 시 임시 파드 사용:
-> `kubectl run psql-temp -n stockops --rm -it --restart=Never --image=postgres:16-alpine -- sh`
-> 등록 후 로그에 `Skipping telemetry ... unknown sensor topic` 이 해당 토픽에 대해 사라지면 정상.
-
-### 애플리케이션 배포 (GitHub Actions + ArgoCD GitOps)
-
-```powershell
-# 서브모듈 포인터 갱신 후 push → deploy.yml 자동 트리거
-cd C:\KJW\Team_Project\Stockops-Application
-git submodule update --remote --merge
-git add .
-git commit -m "Sync submodules to latest"
-git push
-
-# 또는 수동 트리거
-gh workflow run deploy.yml
-```
-
-- 정적(client/admin): Vite 빌드 → S3 sync → CloudFront 무효화
-- 동적(api/ai): 이미지 빌드 → 서울+오하이오 ECR 직접 push(OIDC) → Stockops-GitOps `kustomization.yaml` 이미지 태그 업데이트 commit → ArgoCD 자동 sync
 
 ### 검증
 
 ```powershell
 kubectl get pods -n stockops
-terraform -chdir=regions/global output
 
-# 동적 API + CORS
-curl.exe -i -X OPTIONS https://api.siseon.live/api/v1/auth/login -H "Origin: https://app.siseon.live" -H "Access-Control-Request-Method: POST" | findstr /I "HTTP Access-Control-Allow"
+# CORS 확인
+curl.exe -i -X OPTIONS https://api.siseon.live/api/v1/auth/login \
+  -H "Origin: https://app.siseon.live" \
+  -H "Access-Control-Request-Method: POST" | findstr /I "HTTP Access-Control"
 
-# 타깃 그룹 헬스 (GA 健康의 전제 — 둘 다 healthy 여야 함)
+# 타깃 그룹 헬스 (GA healthy 판정 전제)
 foreach ($n in "seoul-spring-tg","seoul-fastapi-tg") {
-  $tg = aws elbv2 describe-target-groups --names $n --region ap-northeast-2 --profile siseon --query "TargetGroups[0].TargetGroupArn" --output text
-  aws elbv2 describe-target-health --target-group-arn $tg --region ap-northeast-2 --profile siseon --query "TargetHealthDescriptions[].TargetHealth.State" --output text
+  $tg = aws elbv2 describe-target-groups --names $n --region ap-northeast-2 --profile siseon `
+    --query "TargetGroups[0].TargetGroupArn" --output text
+  aws elbv2 describe-target-health --target-group-arn $tg --region ap-northeast-2 --profile siseon `
+    --query "TargetHealthDescriptions[].TargetHealth.State" --output text
 }
-
-# 센서 SQS 소비 검증
-aws sqs get-queue-attributes --queue-url $Q --attribute-names ApproximateNumberOfMessages --profile siseon --region ap-northeast-2
-kubectl exec -it -n stockops deploy/stockops-redis -- redis-cli KEYS "stockops:sensor:readings:*"
-kubectl logs -n stockops -l app=stockops-api --tail=100 | findstr /I "SQS ingestion started Skipping"
 ```
 
-### 초기 로그인 계정
+### 초기 로그인
+
 - 이메일: `admin@stockops.com`
 - 비밀번호: `admin123`
 
 ---
 
-## 종료 (destroy)
+## 종료 (Destroy)
 
-> Peering state가 VPC Peering을 소유하고 있어 **Peering이 존재하는 한 Ohio VPC를 삭제할 수 없다.**
-> Ohio RDS Replica는 Seoul RDS Primary를 참조하므로 Ohio를 Seoul보다 먼저 destroy해야 한다.
-> 따라서 **Peering → Ohio → Seoul** 순으로 진행한다. targeted destroy 불필요.
+Destroy 순서: `global → peering → ohio → seoul`
+
+> Peering state가 VPC Peering을 소유하므로 **Peering 먼저 destroy** 해야 Ohio VPC를 삭제할 수 있습니다.  
+> Ohio RDS Replica가 Seoul RDS Primary를 참조하므로 **Ohio를 Seoul보다 먼저** destroy합니다.
 
 ```powershell
-# 1. Global (GA·CloudFront·ACM·Route53 레코드 먼저 삭제)
 terraform -chdir=regions/global destroy -auto-approve
-
-# 2. Peering (피어링·라우트 전체 삭제 → Ohio VPC 삭제 블록 해제)
 terraform -chdir=peering destroy -auto-approve
-
-# 3. Ohio (VPC 포함 전체 삭제)
 terraform -chdir=regions/ohio destroy -auto-approve
-
-# 4. Seoul (RDS Primary 등 나머지)
 terraform -chdir=regions/seoul destroy -auto-approve
 ```
 
-> 정적 S3 버킷은 `data` 참조라 destroy 해도 버킷·자산 유지(팀 패턴).
-> IoT Policy/Thing detach 실패 시 수동 `aws iot detach-policy` / `aws iot detach-thing-principal` 필요.
+> 정적 S3 버킷은 `data` source 참조이므로 destroy해도 버킷·자산이 유지됩니다.
 
-### Destroy 트러블슈팅
+---
 
-| 증상 | 원인 | 해결 |
-|------|------|------|
-| Ohio `terraform destroy` 중 `helm_release.argocd` 가 10분+ "Still destroying..." | ArgoCD Application finalizer가 namespace 삭제를 블록 | `kubectl patch application <name> -n argocd --context <ohio-ctx> --type merge -p '{"metadata":{"finalizers":null}}'` → `kubectl delete namespace argocd --grace-period=0 --force` → 그래도 멈추면 terraform 프로세스 강제 종료(`Get-Process terraform \| Stop-Process -Force`) → `terraform force-unlock -force <lock-id>` → `terraform state rm helm_release.argocd kubernetes_namespace_v1.stockops` → destroy 재실행 |
-| Ohio VPC destroy 중 `DependencyViolation` | Peering destroy를 먼저 실행했는지 확인. 이미 peering destroy 했는데 발생하면 VPC Peering이 수동 생성된 것. `aws ec2 delete-vpc-peering-connection --vpc-peering-connection-id <pcx-id> --region us-east-2 --profile siseon` 으로 수동 삭제 후 `terraform -chdir=peering state rm ...` 으로 peering state 정리 |
-| terraform이 state lock을 잡은 채 멈춤 | 백그라운드 프로세스가 lock 파일을 유지 | `Get-Process terraform \| Stop-Process -Force` → `terraform force-unlock -force <lock-id>` |
+## ArgoCD 접근
 
-### Apply 후 ArgoCD Application 등록
-
-EKS 클러스터를 새로 만든 뒤에는 ArgoCD가 설치되지만 Application은 자동 등록되지 않는다. Terraform apply 완료 후 수동으로 적용해야 한다(전체 신규 구축 5번 참조).
+ArgoCD는 `ClusterIP`로 운영됩니다. 포트포워딩으로 접근하세요.
 
 ```powershell
-kubectl apply -f "C:\KJW\Team_Project\Stockops-GitOps\argocd\stockops-seoul-application.yaml" `
-  --context arn:aws:eks:ap-northeast-2:448768137813:cluster/seoul-cluster
-kubectl apply -f "C:\KJW\Team_Project\Stockops-GitOps\argocd\stockops-ohio-application.yaml" `
-  --context arn:aws:eks:us-east-2:448768137813:cluster/ohio-cluster
-
-# 등록 확인
-kubectl get application -n argocd --context arn:aws:eks:ap-northeast-2:448768137813:cluster/seoul-cluster
-kubectl get application -n argocd --context arn:aws:eks:us-east-2:448768137813:cluster/ohio-cluster
-```
-
-### destroy 후 잔재 확인
-
-```powershell
-aws ec2 describe-vpcs --region ap-northeast-2 --profile siseon --query "Vpcs[?IsDefault=='false'].VpcId"
-aws ec2 describe-vpcs --region us-east-2 --profile siseon --query "Vpcs[?IsDefault=='false'].VpcId"
-aws eks list-clusters --region ap-northeast-2 --profile siseon
-aws eks list-clusters --region us-east-2 --profile siseon
-aws globalaccelerator list-accelerators --region us-west-2 --profile siseon --query "Accelerators[*].Name"
+kubectl port-forward svc/argocd-server -n argocd 8080:443
+# https://localhost:8080  /  admin  /  (초기 비밀번호 아래 명령으로 확인)
+$b64 = kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}"
+[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))
 ```
 
 ---
 
-## IoT 인증서 추출 (현수님 전달용)
+## 팀 클러스터 접근 (aws-auth)
 
-```powershell
-# destroy/재apply 후 실행
-$cert = terraform output -json certificate_pem | ConvertFrom-Json
-[System.IO.File]::WriteAllText("$PWD\mosquitto-bridge.cert.pem", $cert)
-
-$key = terraform output -json private_key | ConvertFrom-Json
-[System.IO.File]::WriteAllText("$PWD\mosquitto-bridge.private.key", $key)
-
-# AmazonRootCA1.pem (고정값 — 전 리전 공통, 서울/오하이오 동일 파일 재사용 가능)
-Invoke-WebRequest -Uri "https://www.amazontrust.com/repository/AmazonRootCA1.pem" -OutFile "AmazonRootCA1.pem"
-```
-
-> 오하이오 브리지 접속 4종: `AmazonRootCA1.pem`(서울 것 재사용) + `ohio-device.cert.pem` + `ohio-device.private.key` + 오하이오 엔드포인트(`a2ie1b3xp2emgi-ats.iot.us-east-2.amazonaws.com`). `*.public.key` 는 접속에 사용 안 함.
+팀원 4명은 IAM Identity Center(SSO) 권한셋 `AWSReservedSSO_AdministratorAccess`를 사용합니다.  
+`regions/seoul/kubernetes.tf`의 `aws-auth` ConfigMap에 해당 권한셋 role ARN을 매핑하여 kubectl/ArgoCD 작업이 가능합니다.
 
 ---
 
-## 로드맵
-
-- [x] VPC + EKS + ALB + RDS + ECR 배포 (서울)
-- [x] GitHub Actions OIDC 전환 (액세스 키 제거)
-- [x] IoT Core + SQS + Firehose 팬아웃 파이프라인 (실시간 SQS + GZIP/날짜파티션 S3 → Athena 분석)
-- [x] S3 Terraform backend + state 중앙화 (seoul/ohio/global 분리)
-- [x] Secrets Manager + ESO 연동 (시크릿 자동화)
-- [x] ArgoCD 설치
-- [x] 멀티 리전 (오하이오) 풀스택 + 리전별 독립 ECR (CI 직접 push)
-- [x] Cross-Region RDS Read Replica
-- [x] Global Accelerator (HTTP/HTTPS 리스너, 지연 라우팅)
-- [x] Karpenter + HPA (노드/파드 오토스케일링)
-- [x] 팀 도메인 연결 (**siseon.live**) + Route53 위임 세트
-- [x] ACM HTTPS (ALB + CloudFront 인증서 분리)
-- [x] CORS 환경변수 적용 (`STOCKOPS_CORS_ALLOWED_ORIGINS` — REST+WS 동시 제어)
-- [x] WebSocket ALB 룰 (`/ws`)
-- [x] **정적 프론트 CloudFront + S3(OAC) 전환** (client/admin nginx EKS 제거, ALB 타깃그룹 정리)
-- [x] IoT 브리지 연결 확인
-- [x] 멀티리전 ECR 직접 push(Option B) + 이미지 SHA 태그 (CRR race 제거, 리전별 롤백)
-- [x] 서울 RDS Multi-AZ 활성화 (지금은 주석)
-- [x] WAF — ALB/GA/CloudFront 앞단 보안
-- [x] **api-server SQS 컨슈머 → Redis → 웹 실시간 표시 E2E 완성** (env+IRSA+sts+JSON매핑+센서등록) ✨ 2026-06-15
-- [x] **팀원 SSO 권한셋 aws-auth 매핑** (kubectl/ArgoCD 공동 작업)
-- [x] ArgoCD 앱 구성 (GitOps CD) — 서울/오하이오 독립 설치, Stockops-GitOps 연동, 자동 sync 완성 ✨ 2026-06-18
-- [x] AI 기능 활성화 (`STOCKOPS_BEDROCK_ENABLED=true`, 서울/오하이오 공통) ✨ 2026-06-18
-
-자세한 아키텍처는 `ARCHITECTURE.md`, AWS 리소스 목록은 `AWS_RESOURCES.md` 참고.
+자세한 아키텍처는 [ARCHITECTURE.md](ARCHITECTURE.md), AWS 리소스 목록은 [AWS_RESOURCES.md](AWS_RESOURCES.md)를 참고하세요.
