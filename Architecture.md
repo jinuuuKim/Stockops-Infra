@@ -167,15 +167,34 @@ GitHub Actions (CI) — main push / workflow_dispatch
 ├─ [정적] client-web / admin-web
 │    └─ Vite 빌드 → aws s3 sync --delete → CloudFront 무효화
 └─ [동적] api-server / ai-module
-     └─ 이미지 빌드 → 서울 ECR + 오하이오 ECR 각각 직접 push (OIDC, Option B)
-          └─ kubectl rollout restart
+     └─ 이미지 빌드 → 서울 ECR + 오하이오 ECR 각각 직접 push (OIDC)
+          └─ Stockops-GitOps overlays/kustomization.yaml 이미지 SHA commit/push
+               └─ ArgoCD 자동 감지 → 서울/오하이오 각 클러스터 sync
 
-ArgoCD (CD) — v7.7.0 설치 완료, 앱 구성 예정 (허브-스포크: 서울 ArgoCD 가 서울+오하이오 관리)
+ArgoCD (CD) — v7.7.0, 서울/오하이오 클러스터 각각 독립 설치 (in-cluster)
+  ├─ stockops-seoul → Stockops-GitOps/apps/stockops/seoul/overlays
+  └─ stockops-ohio  → Stockops-GitOps/apps/stockops/ohio/overlays
 ```
 
 - OIDC 인증(`github-actions-ecr-push`): `role-to-assume` 방식, 액세스 키 없음. `ecr_arns` 에 서울+오하이오 리포 ARN 모두 포함.
-- **ECR 은 리전별 독립 리포**(서울/오하이오 각각 `stockops-api`/`stockops-ai`)이며 CI 가 양 리전에 직접 push(Option B). CRR(Cross-Region Replication) 미사용 → 복제 지연 race 없음, 리전별 롤백 가능.
+- **ECR 은 리전별 독립 리포**(서울/오하이오 각각 `stockops-api`/`stockops-ai`)이며 CI 가 양 리전에 직접 push. CRR(Cross-Region Replication) 미사용 → 복제 지연 race 없음, 리전별 롤백 가능.
 - Terraform 이 ECR(그릇)을 만들고, GitHub Actions 가 이미지(내용물)를 채운다.
+
+### ArgoCD Application 구성 (Stockops-GitOps)
+
+| 항목 | 서울 | 오하이오 |
+|------|------|----------|
+| Application 이름 | `stockops-seoul` | `stockops-ohio` |
+| 대상 클러스터 | `https://kubernetes.default.svc` (in-cluster) | `https://kubernetes.default.svc` (in-cluster) |
+| 대상 네임스페이스 | `stockops` | `stockops` |
+| GitOps 경로 | `apps/stockops/seoul/overlays` | `apps/stockops/ohio/overlays` |
+| 이미지 | 서울 ECR SHA 태그 | 오하이오 ECR SHA 태그 |
+| automated sync | prune=true, selfHeal=true | 동일 |
+
+- `ignoreDifferences: /spec/replicas` — HPA(Terraform 소유)가 replica 수를 관리하므로 ArgoCD 가 덮어쓰지 않음.
+- `CreateNamespace=false` — `stockops` 네임스페이스는 Terraform 소유.
+- **Terraform 소유**: VPC · EKS · ALB · RDS · ECR · ESO · LBC · ArgoCD 설치 · aws-auth · IRSA · Service · TargetGroupBinding · HPA · Redis · Namespace.
+- **ArgoCD(이 레포) 소유**: `stockops-api` · `stockops-ai` **Deployment 만**.
 
 ### CORS
 
@@ -342,4 +361,4 @@ Secrets Manager (stockops/app)
 
 ---
 
-*최종 업데이트: 2026-06-29 / ALB idle_timeout=120s 추가, GA Ohio 엔드포인트 그룹 주석 처리(서울 only), peering/ 디렉토리 및 state 구조 반영, regions/ 디렉토리 구조 정정*
+*최종 업데이트: 2026-06-29 / ALB idle_timeout=120s 추가, GA Ohio 엔드포인트 그룹 주석 처리(서울 only), peering/ 디렉토리·state 구조 반영, regions/ 경로 정정, ArgoCD Application 구성(v7.7.0, in-cluster 독립 설치, automated sync+selfHeal) 반영*
