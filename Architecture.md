@@ -109,11 +109,11 @@ EventBridge Rule (cron(0 17 ? * SUN), 주 1회)
 
 - 관리 리전: us-west-2 (GA 글로벌 리소스)
 - 리스너: **TCP 80 + TCP 443** (2개)
-- 엔드포인트 그룹: 서울(ap-northeast-2) + 오하이오(us-east-2) × (HTTP/HTTPS), 각 `traffic_dial 100%`, `client_ip_preservation_enabled = true`
+- 엔드포인트 그룹: **현재 서울(ap-northeast-2) only** (HTTP/HTTPS), `traffic_dial 100%`, `client_ip_preservation_enabled = true`
 - 헬스체크: HTTP/HTTPS `/`, 30초 간격, threshold 3
 
 > ⚠️ GA 는 ALB 엔드포인트의 헬스를 **ALB 타깃 그룹 상태**로 판정한다. `spring_tg`·`fastapi_tg` 가 모두 healthy 해야 GA 가 해당 ALB 를 healthy 로 본다(엔드포인트 그룹의 `health_check_path` 는 ALB 엔드포인트에 무시됨).
-> `enable_ohio` 변수는 정의돼 있으나 현재 코드에서 미사용 — 오하이오 GA 엔드포인트 그룹(`ohio_http`/`ohio_https`)은 항상 생성된다. 오하이오를 빼려면 해당 리소스 + `terraform_remote_state.ohio` 를 주석 처리한다.
+> **오하이오 엔드포인트 그룹(`ohio_http`/`ohio_https`) 및 `terraform_remote_state.ohio`는 현재 주석 처리** — Ohio 미배포 상태. Ohio 재배포 후 주석 해제 필요.
 
 ---
 
@@ -201,7 +201,7 @@ STOCKOPS_CORS_ALLOWED_ORIGINS = "https://app.siseon.live,https://siseon.live"
 Stockops-Infra/
 ├── bootstrap/        # state 버킷 하드닝 + KMS(siseon-tfstate) — 로컬 백엔드
 ├── modules/          # 공통 모듈
-│   ├── alb/          # ALB + Target Groups + HTTPS + REGIONAL WAF
+│   ├── alb/          # ALB (idle_timeout=120s) + Target Groups + HTTPS + REGIONAL WAF
 │   ├── db/           # RDS PostgreSQL 18 + 파라미터 그룹
 │   ├── ecr/          # ECR 리포 (for_each, KMS, lifecycle)
 │   ├── eks/          # EKS + 관리형 노드그룹 + IRSA(LBC) + OIDC
@@ -209,9 +209,11 @@ Stockops-Infra/
 │   ├── iot/          # IoT Thing + Rule + SQS/DLQ + Firehose→S3
 │   ├── karpenter/    # Karpenter + NodePool/EC2NodeClass + 인터럽션 SQS
 │   └── vpc/          # VPC + 3-Tier Subnets (karpenter.sh/discovery 태그)
-├── seoul/            # 서울 (풀스택 + IoT + DR + Route53 존 + 서울 ACM + GitHub OIDC)
-├── ohio/             # 오하이오 (풀스택 미러 + RDS Read Replica + 오하이오 ACM + 페일오버 IoT)
-└── global/           # Global Accelerator + Route53 A + CloudFront/S3(OAC) + CloudFront ACM/WAF
+├── regions/
+│   ├── seoul/        # 서울 (풀스택 + IoT + DR + Route53 존 + 서울 ACM + GitHub OIDC)
+│   ├── ohio/         # 오하이오 (풀스택 미러 + RDS Read Replica + 오하이오 ACM + 페일오버 IoT)
+│   └── global/       # Global Accelerator + Route53 A + CloudFront/S3(OAC) + CloudFront ACM/WAF
+└── peering/          # Seoul ↔ Ohio VPC 피어링 (remote_state로 VPC ID·RT ID 참조, 하드코딩 없음)
 ```
 
 ### Terraform State (S3 backend)
@@ -221,6 +223,7 @@ siseon-terraform-state/
 └── infra/
     ├── seoul/terraform.tfstate     # Route53 호스팅 존 + 커스텀 시크릿 소유
     ├── ohio/terraform.tfstate
+    ├── peering/terraform.tfstate   # VPC Peering + 양방향 Route
     └── global/terraform.tfstate
 ```
 
@@ -339,4 +342,4 @@ Secrets Manager (stockops/app)
 
 ---
 
-*최종 업데이트: 2026-06-17 / siseon.live 도메인, 공존 구조(CloudFront+S3 정적 / GA+ALB 동적), Route53+ACM(3종)+WAF(REGIONAL/CLOUDFRONT), Karpenter+HPA, RDS PostgreSQL 18, IoT 팬아웃(SQS+Firehose→S3) E2E, DR 백업 토대(시온님 설계), 리전별 독립 ECR(Option B), state KMS 암호화 반영*
+*최종 업데이트: 2026-06-29 / ALB idle_timeout=120s 추가, GA Ohio 엔드포인트 그룹 주석 처리(서울 only), peering/ 디렉토리 및 state 구조 반영, regions/ 디렉토리 구조 정정*

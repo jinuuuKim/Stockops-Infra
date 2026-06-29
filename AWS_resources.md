@@ -3,8 +3,8 @@
 > 현재까지 Terraform 으로 구축된 AWS 리소스 전체 목록
 > 계정: `448768137813`
 > 리전: 서울 `ap-northeast-2` + 오하이오 `us-east-2` + 글로벌(us-west-2 GA / us-east-1 CloudFront ACM·WAF)
-> IaC: Terraform (`bootstrap` + `modules` + `seoul` + `ohio` + `global`)
-> Terraform State: S3 (`siseon-terraform-state/infra/{seoul,ohio,global}/terraform.tfstate`, KMS 암호화 + 네이티브 락)
+> IaC: Terraform (`bootstrap` + `modules` + `regions/{seoul,ohio,global}` + `peering`)
+> Terraform State: S3 (`siseon-terraform-state/infra/{seoul,ohio,peering,global}/terraform.tfstate`, KMS 암호화 + 네이티브 락)
 
 ---
 
@@ -59,6 +59,7 @@
 ### ALB (서울: seoul-alb / 오하이오: ohio-alb)
 - 리스너: HTTP :80 → HTTPS :443 (301 리다이렉트), HTTPS :443 (ACM, `ELBSecurityPolicy-TLS13-1-2-2021-06`)
 - 타입: Application Load Balancer (public 서브넷)
+- `idle_timeout = 120` (WebSocket/STOMP 장시간 연결 지원)
 
 ### 리스너 규칙 (양 리전 동일, HTTPS 리스너)
 
@@ -230,10 +231,10 @@
 |--------|------|
 | Accelerator | `stockops-global-accelerator` (IPV4, us-west-2 관리) |
 | 리스너 | TCP:80 + TCP:443 |
-| 엔드포인트 그룹 | 서울(http/https) + 오하이오(http/https), 각 `traffic_dial 100%`, `client_ip_preservation_enabled = true` |
+| 엔드포인트 그룹 | **서울(http/https) only** — `traffic_dial 100%`, `client_ip_preservation_enabled = true` |
 | 헬스체크 | HTTP/HTTPS `/`, 30초 간격, threshold 3 |
 
-> ALB ARN 은 `terraform_remote_state` 로 동적 참조. `enable_ohio` 변수는 정의만 되고 미사용 — 오하이오 엔드포인트 그룹은 항상 생성.
+> ALB ARN 은 `terraform_remote_state.seoul` 로 동적 참조. **오하이오 엔드포인트 그룹(`ohio_http`/`ohio_https`) 및 `terraform_remote_state.ohio`는 주석 처리 중** — Ohio 재배포 후 `regions/global/main.tf` 주석 해제 필요.
 > ⚠️ GA 의 ALB 헬스 판정은 ALB 타깃 그룹 상태 기준(spring/fastapi TG 모두 healthy 필요).
 
 ---
@@ -360,32 +361,34 @@ aws iam list-roles --query "Roles[?contains(RoleName, 'seoul') || contains(RoleN
 ## 17. Terraform 모듈 의존 관계
 
 ```
-bootstrap/        → KMS + state 버킷 하드닝 (로컬 백엔드)
+bootstrap/              → KMS + state 버킷 하드닝 (로컬 백엔드)
 
-seoul/main.tf
-├── module.seoul_vpc / alb(+WAF) / eks / karpenter / db / ecr(×2)
-seoul/dns.tf      → Route53 zone(소유) + 서울 ACM
-seoul/iam.tf      → module.github_oidc
-seoul/iot.tf      → module.seoul_iot(SQS+Firehose) + api SQS IRSA
-seoul/secrets.tf  → Secrets Manager + ESO IRSA
-seoul/dr.tf       → DR SG/IAM/EventBridge/ECR·S3 data (Lambda 주석)
-seoul/kubernetes.tf → ESO/LBC/ArgoCD/Karpenter helm, svc×3, redis, HPA×2, TGB×2, aws-auth
+regions/seoul/main.tf
+├── module.seoul_vpc / alb(+WAF, idle_timeout=120) / eks / karpenter / db / ecr(×2)
+regions/seoul/dns.tf      → Route53 zone(소유) + 서울 ACM
+regions/seoul/iam.tf      → module.github_oidc
+regions/seoul/iot.tf      → module.seoul_iot(SQS+Firehose) + api SQS IRSA
+regions/seoul/secrets.tf  → Secrets Manager + ESO IRSA
+regions/seoul/dr.tf       → DR SG/IAM/EventBridge/ECR·S3 data (Lambda 주석)
+regions/seoul/kubernetes.tf → ESO/LBC/ArgoCD/Karpenter helm, svc×3, redis, HPA×2, TGB×2, aws-auth
 
-ohio/main.tf
-├── module.ohio_vpc / alb(+WAF) / eks / karpenter / ecr(×2)
+regions/ohio/main.tf
+├── module.ohio_vpc / alb(+WAF, idle_timeout=120) / eks / karpenter / ecr(×2)
 ├── aws_db_instance.ohio_replica (서울 RDS 복제)
-ohio/dns.tf       → 오하이오 ACM (서울 zone 참조)
-ohio/iot.tf       → SQS(페일오버) + api SQS IRSA
-ohio/secrets.tf   → ESO IRSA (서울 시크릿 ARN 참조)
-ohio/kubernetes.tf → LBC/ArgoCD/Karpenter helm, svc×3, redis, HPA×2, TGB×2, aws-auth
+regions/ohio/dns.tf       → 오하이오 ACM (서울 zone 참조)
+regions/ohio/iot.tf       → SQS(페일오버) + api SQS IRSA
+regions/ohio/secrets.tf   → ESO IRSA (서울 시크릿 ARN 참조)
+regions/ohio/kubernetes.tf → LBC/ArgoCD/Karpenter helm, svc×3, redis, HPA×2, TGB×2, aws-auth
 
-global/main.tf    → GA(listener×2, endpoint group×4) — seoul/ohio ALB ARN 참조
-global/acm.tf     → CloudFront ACM (us-east-1)
-global/dns.tf     → Route53 A(Alias) ×3
-global/frontend.tf → CloudFront×2 + S3(OAC) data + 버킷 정책
-global/waf.tf     → CLOUDFRONT WAF
+peering/main.tf           → Seoul↔Ohio VPC 피어링·수락·양방향 라우트 (remote_state 참조, 하드코딩 없음)
+
+regions/global/main.tf    → GA(listener×2, endpoint group×2 서울only — Ohio 주석) — seoul ALB ARN 참조
+regions/global/acm.tf     → CloudFront ACM (us-east-1)
+regions/global/dns.tf     → Route53 A(Alias) ×3
+regions/global/frontend.tf → CloudFront×2 + S3(OAC) data + 버킷 정책
+regions/global/waf.tf     → CLOUDFRONT WAF
 ```
 
 ---
 
-*최종 업데이트: 2026-06-17 / bootstrap(KMS state), Route53+ACM(3종), WAF(REGIONAL×2 + CLOUDFRONT), CloudFront+S3(OAC) 정적 프론트, GA(80+443, 4 endpoint groups), Karpenter+HPA, RDS PostgreSQL 18(파라미터 그룹), IoT 팬아웃(SQS+Firehose→S3), 리전별 독립 ECR(Option B), DR 백업 토대(시온님 설계), Terraform 관리 워크로드 범위 정정(api/ai는 CI/ArgoCD) 반영*
+*최종 업데이트: 2026-06-29 / ALB idle_timeout=120s 추가, GA Ohio 엔드포인트 그룹 주석 처리(서울 only, 2 endpoint groups), peering/ 모듈 및 state 반영, 디렉토리 경로 regions/ 정정*
