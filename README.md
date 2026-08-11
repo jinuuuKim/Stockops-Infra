@@ -16,6 +16,73 @@ K-Food 수출 기업(예: 비비고 만두)을 모델로 한 ERP/WMS 솔루션 S
 
 ---
 
+## 👤 담당 범위
+
+4인 팀 프로젝트 **StockOps**(팀명 시선) 중 **인프라 파트**를 담당했습니다. 이 레포와 [Stockops-GitOps](https://github.com/jinuuuKim/Stockops-GitOps)가 담당 산출물입니다.
+
+| 영역 | 내용 |
+|------|------|
+| **IaC** | Terraform 전체 — VPC·EKS·RDS·ALB·ECR·IoT·Karpenter 모듈 8종 및 리전별 구성 |
+| **State 설계** | 리전·계층 기준 4분리(`seoul`/`ohio`/`peering`/`global`) + 적용 순서 규칙화 |
+| **네트워크** | VPC 3-Tier · 서울↔오하이오 피어링 · Global Accelerator 지연 라우팅 |
+| **오토스케일링** | HPA(파드) + Karpenter(노드) 2단 구성, spot 우선 |
+| **CI/CD** | GitHub Actions(OIDC 키리스) + ArgoCD GitOps |
+| **보안** | GitHub OIDC·IRSA(정적 키 0개) · Secrets Manager+ESO · WAF 2계층 · SG 최소권한 |
+
+---
+
+## 📊 실측 수치
+
+| 항목 | 값 |
+|------|-----|
+| IaC 커버리지 | Terraform 모듈 **8종** · State **4분리** — 전체 destroy 후 재apply 시 동일 구성 재현 확인 |
+| 운영 파드 | **5개 → 3개 (40% 감축)** — 프론트엔드를 S3+CloudFront로 오프로딩 |
+| 인증 | GitHub OIDC + IRSA — **정적 액세스 키 0개** |
+| 멀티 리전 | EKS **2개**(서울·오하이오) + Global Accelerator 지연 라우팅 · RDS Cross-Region Replica |
+| 오토스케일 | HPA(파드 1~4) + Karpenter(노드) 2단, spot 우선 |
+
+---
+
+## 🖥️ 실행 화면
+
+![Terraform 디렉토리 구조](screenshots/Terraform_Directory.png)
+
+> 재사용 모듈 8종(`modules/`)과 **리전·계층별로 분리된 실행 단위**. `peering`을 `regions`와 같은 층에 둔 것이 핵심으로, 서울/오하이오 어느 쪽을 다시 적용해도 피어링이 독립적으로 유지됩니다.
+
+![Karpenter 노드 프로비저닝](screenshots/EKS_NodeScaling.png)
+
+> 부하가 몰리자 Karpenter가 **t3.large spot 노드 2대를 30초 이내에 자동 프로비저닝**하는 순간(`kubectl get nodeclaims`). HPA가 파드를 늘리고 → 배치할 자리가 부족하면 Karpenter가 노드를 띄우는 2단 구조입니다.
+
+![Global Accelerator 엔드포인트](screenshots/GA_Endpoint.png)
+
+> Global Accelerator 리스너(443/80)에 **서울·오하이오 두 리전이 모두 엔드포인트로 등록되어 정상 상태**. 지연 기반으로 한국→서울, 미국→오하이오로 라우팅되며 리전 장애 시 자동 페일오버합니다.
+
+---
+
+## 🔑 설계 판단
+
+### 1. State를 왜 4개로 나눴나 — 그리고 나눠서 생긴 문제
+
+리전 하나를 손볼 때마다 전체 인프라가 잠기는 걸 막으려고 **리전·계층 기준으로 상태 파일을 나눴습니다**(`seoul`/`ohio`/`peering`/`global`).
+
+**그런데 분리 자체가 답은 아니었습니다.** 한쪽 리전을 다시 적용하면 리전 VPC 모듈이 라우팅 테이블을 통째로 덮어써 **다른 쪽 피어링 경로가 사라지는 문제**가 생겼습니다. 상태를 나눈다고 리소스 간 의존성까지 사라지는 게 아니었던 겁니다.
+
+- **적용 순서를 규칙으로 못 박고** 문서화 — `seoul → ohio → peering → global` (destroy는 역순)
+- **리소스 참조에서 하드코딩을 제거** — `terraform_remote_state`로 상대 state의 출력값을 읽어오도록 변경
+- 전체 destroy 후 재apply해 **동일 구성이 재현되는 것까지 확인**
+
+### 2. HPA와 Karpenter를 왜 둘 다
+
+층이 다르기 때문입니다. **HPA는 파드 수**를, **Karpenter는 그 파드를 올릴 노드**를 담당합니다. HPA만 있으면 파드가 늘어도 배치할 자리가 없어 `Pending`에 멈추고, Karpenter만 있으면 부하에 따른 파드 증감이 안 됩니다.
+
+> ⚠️ 초기에 Karpenter가 노드를 못 띄우는 문제가 있었는데, 원인은 `SecurityGroupSelectorTerms`가 참조하는 태그가 클러스터 보안 그룹에 누락된 것이었습니다. `aws_ec2_tag`로 태그를 보강해 해결했습니다. (`modules/eks/main.tf`)
+
+### 3. 왜 정적 액세스 키를 하나도 만들지 않았나
+
+키는 만드는 순간 관리 대상이 되고, 유출되면 회수 전까지 계속 유효합니다. **CI는 GitHub OIDC로, 파드는 IRSA로** 필요한 순간에만 임시 자격증명을 발급받도록 구성해 **장기 자격증명을 아예 만들지 않았습니다**. 시크릿도 매니페스트에 넣지 않고 Secrets Manager + ESO로 클러스터가 직접 가져가게 했습니다.
+
+---
+
 ## 레포 구성
 
 | 레포 | 설명 |
